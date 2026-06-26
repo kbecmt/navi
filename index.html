@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TomTom Lite Web Navigation</title>
+    
+    <!-- Biblioteka Map Leaflet (CSS i JS) -->
+    <link rel="stylesheet" href="https://unpkg.com" />
+    <script src="https://unpkg.com"></script>
+    
+    <!-- Wtyczka do rysowania tras (Leaflet Routing Machine) -->
+    <script src="https://unpkg.com"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body, html { height: 100%; overflow: hidden; }
+        
+        #map { width: 100%; height: 100%; z-index: 1; }
+
+        /* Panel wyszukiwania na górze */
+        .search-panel {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            z-index: 1000; background: rgba(255, 255, 255, 0.95);
+            padding: 10px; display: flex; gap: 8px;
+            border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        .search-panel input {
+            flex: 1; padding: 10px; border: 1px solid #ccc;
+            border-radius: 4px; font-size: 14px;
+        }
+        .search-panel button {
+            padding: 10px 20px; background: #FF6600; color: white;
+            border: none; border-radius: 4px; font-weight: bold;
+            cursor: pointer; font-size: 14px;
+        }
+
+        /* Panel fotoradarów pod wyszukiwarką */
+        .radar-panel {
+            position: absolute; top: 70px; left: 10px; right: 10px;
+            z-index: 1000; background: #E53935; color: white;
+            padding: 12px; text-align: center; font-weight: bold;
+            border-radius: 8px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Panel statusu na dole */
+        .status-panel {
+            position: absolute; bottom: 10px; left: 10px; right: 10px;
+            z-index: 1000; background: rgba(255, 255, 255, 0.95);
+            padding: 15px; border-radius: 8px;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.15); font-size: 15px;
+        }
+        .status-title { font-weight: bold; margin-bottom: 3px; color: #000; }
+
+        /* Ukrycie domyślnego panelu tekstowego trasy Leaflet, aby zachować styl Lite */
+        .leaflet-routing-container { display: none !important; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.8; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="search-panel">
+        <input type="text" id="targetAddress" placeholder="Wpisz adres docelowy...">
+        <button onclick="szukajIJedz()">Jedź</button>
+    </div>
+
+    <div class="radar-panel" id="radarAlert">
+        ⚠️ ZWOLNIJ! FOTORADAR ZA <span id="radarDistance">0</span> METRÓW
+    </div>
+
+    <div id="map"></div>
+
+    <div class="status-panel">
+        <div class="status-title" id="navTarget">Oczekiwanie na cel...</div>
+        <div id="navDetails">Zezwól na dostęp do GPS, aby rozpocząć.</div>
+    </div>
+
+    <script>
+        let map, userMarker, routingControl;
+        let userLocation = null;
+        let fotoradary = [];
+
+        // 1. Inicjalizacja płaskiej mapy 2D (Lite)
+        map = L.map('map', { zoomControl: false }).setView([52.2297, 21.0122], 13);
+        
+        // Dodanie czystej tekstury mapy OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+        }).addTo(map);
+
+        // 2. Pobieranie pozycji GPS użytkownika na żywo
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    userLocation = L.latLng(lat, lng);
+
+                    if (!userMarker) {
+                        // Niebieski punkt lokalizacji (Styl TomTom)
+                        userMarker = L.circleMarker(userLocation, {
+                            radius: 9, color: '#fff', weight: 3, fillOpacity: 1, fillColor: '#007BFF'
+                        }).addTo(map);
+                        map.setView(userLocation, 15);
+                        pobierzFotoradary(lat, lng); // Pobierz fotoradary wokół nowej pozycji
+                    } else {
+                        userMarker.setLatLng(userLocation);
+                    }
+                    
+                    sprawdzDystansDoRadarow(userLocation);
+                },
+                (error) => { alert("Błąd GPS lub brak uprawnień w przeglądarce."); },
+                { enableHighAccuracy: true }
+            );
+        }
+
+        // 3. Geokodowanie i Wyznaczanie Trasy (Kliknięcie "Jedź")
+        async function szukajIJedz() {
+            const adres = document.getElementById('targetAddress').value;
+            if (!userLocation) { return alert("Brak sygnału GPS!"); }
+            if (!adres) { return alert("Wpisz adres!"); }
+
+            try {
+                // Szukanie współrzędnych adresu za pomocą darmowego API Nominatim
+                const response = await fetch(`https://openstreetmap.org{encodeURIComponent(adres)}`);
+                const data = await response.json();
+
+                if (data.length === 0) { return alert("Nie znaleziono podanego adresu."); }
+                
+                const destLat = parseFloat(data[0].lat);
+                const destLng = parseFloat(data[0].lon);
+                const destination = L.latLng(destLat, destLng);
+
+                // Usuń poprzednią trasę jeśli istnieje
+                if (routingControl) { map.removeControl(routingControl); }
+
+                // Rysowanie pomarańczowej trasy TomTom
+                routingControl = L.Routing.control({
+                    waypoints: [userLocation, destination],
+                    lineOptions: {
+                        styles: [{ color: '#FF6600', opacity: 0.9, weight: 7 }]
+                    },
+                    createMarker: function() { return null; } // Brak zbędnych pinezek start/koniec w wersji Lite
+                }).addTo(map);
+
+                // Aktualizacja panelu informacyjnego po przeliczeniu trasy
+                routingControl.on('routesfound', function(e) {
+                    const route = e.routes[0];
+                    const dystansKm = (route.summary.totalDistance / 1000).toFixed(1);
+                    const czasMin = Math.round(route.summary.totalTime / 60);
+
+                    document.getElementById('navTarget').innerText = `Cel: ${data[0].name || adres}`;
+                    document.getElementById('navDetails').innerText = `Dystans: ${dystansKm} km | Czas: ${czasMin} min`;
+                });
+
+            } catch (e) {
+                alert("Błąd połączenia podczas wyszukiwania trasy.");
+            }
+        }
+
+        // 4. Pobieranie fotoradarów przez Overpass API (w promieniu 5km)
+        async function pobierzFotoradary(lat, lng) {
+            try {
+                const url = `https://overpass-api.de[out:json];node(around:5000,${lat},${lng})[highway=speed_camera];out;`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                fotoradary = data.elements.map(el => L.latLng(el.lat, el.lon));
+
+                // Naniesienie fotoradarów na mapę jako minimalistyczne czarne punkty
+                fotoradary.forEach(radar => {
+                    L.circleMarker(radar, {
+                        radius: 5, color: '#000', weight: 2, fillColor: '#FF0000', fillOpacity: 1
+                    }).bindPopup("Fotoradar stacjonarny").addTo(map);
+                });
+            } catch (e) { console.log("Błąd pobierania bazy fotoradarów."); }
+        }
+
+        // 5. Sprawdzanie odległości od radarów podczas przemieszczania się
+        function sprawdzDystansDoRadarow(currentPos) {
+            let najblizszyDystans = Infinity;
+
+            fotoradary.forEach(radar => {
+                const dystansMetry = currentPos.distanceTo(radar); // Metoda wbudowana w Leaflet
+                if (dystansMetry < najblizszyDystans) {
+                    najblizszyDystans = dystansMetry;
+                }
+            });
+
+            const alertPanel = document.getElementById('radarAlert');
+            // Jeśli fotoradar jest bliżej niż 400 metrów - wyświetl alert
+            if (najblizszyDystans <= 400) {
+                document.getElementById('radarDistance').innerText = Math.round(najblizszyDystans);
+                alertPanel.style.display = 'block';
+            } else {
+                alertPanel.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
