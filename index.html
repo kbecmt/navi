@@ -15,24 +15,81 @@ body,html{
     height:100%;
     overflow:hidden;
     background:#0f1117;
-    font-family:Arial;
+    font-family:Arial, sans-serif;
 }
 
 #map{
     width:100%;
     height:100%;
+    transition: transform 0.3s ease;
+    background:#0a0a0f;
 }
 
+/* Hamburger button */
+#menuBtn{
+    position:absolute;
+    top:65px;
+    left:15px;
+    z-index:1000;
+    background:#1c1f2a;
+    border:none;
+    color:white;
+    font-size:24px;
+    width:44px;
+    height:44px;
+    border-radius:10px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    transition: background 0.2s;
+}
+#menuBtn:hover{
+    background:#2a2e3d;
+}
+#menuBtn .bar{
+    display:block;
+    width:22px;
+    height:3px;
+    background:white;
+    margin:3px auto;
+    border-radius:2px;
+    transition: 0.3s;
+}
+#menuBtn.open .bar:nth-child(1){
+    transform:rotate(45deg) translate(4px,6px);
+}
+#menuBtn.open .bar:nth-child(2){
+    opacity:0;
+}
+#menuBtn.open .bar:nth-child(3){
+    transform:rotate(-45deg) translate(4px,-6px);
+}
+
+/* Panel */
 #panel{
     position:absolute;
-    top:15px;
+    top:65px;
     left:15px;
     z-index:999;
     background:#1c1f2a;
-    padding:12px;
+    padding:0;
     border-radius:10px;
     width:260px;
     color:white;
+    max-height:0;
+    overflow:hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    box-shadow:0 2px 12px rgba(0,0,0,0.4);
+}
+#panel.open{
+    max-height:350px;
+    padding:12px;
+}
+#panel h3{
+    margin:0 0 10px 0;
+    font-size:16px;
 }
 
 input{
@@ -43,6 +100,10 @@ input{
     border-radius:6px;
     background:#111522;
     color:white;
+    box-sizing:border-box;
+}
+input::placeholder{
+    color:#555;
 }
 
 button{
@@ -56,20 +117,226 @@ button{
     font-weight:bold;
     cursor:pointer;
 }
-
 button.stop{
     background:#ff3b3b;
+}
+button.voice-btn{
+    background:#333;
+    font-size:12px;
+    padding:6px;
+    margin-top:4px;
+}
+button.voice-btn.muted{
+    background:#552222;
+    text-decoration:line-through;
+}
+
+/* ===== TomTom-style top notification bar ===== */
+#topBar{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    z-index:1100;
+    background:linear-gradient(135deg,#0077ff,#0044cc);
+    color:white;
+    display:flex;
+    align-items:center;
+    padding:10px 16px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.5);
+    transform:translateY(-100%);
+    transition:transform 0.35s cubic-bezier(.4,0,.2,1);
+    min-height:50px;
+}
+#topBar.show{
+    transform:translateY(0);
+}
+#topBar .arrow{
+    font-size:28px;
+    margin-right:12px;
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,0.3));
+}
+#topBar .info{
+    flex:1;
+}
+#topBar .street{
+    font-size:17px;
+    font-weight:bold;
+}
+#topBar .distance{
+    font-size:26px;
+    font-weight:bold;
+    margin-left:12px;
+    white-space:nowrap;
+}
+
+/* ===== Corner HUD (top-right) — time, distance, ETA ===== */
+#cornerHUD{
+    position:absolute;
+    top:10px;
+    right:10px;
+    z-index:1100;
+    background:rgba(15,17,23,0.88);
+    backdrop-filter:blur(10px);
+    border-radius:12px;
+    padding:10px 14px;
+    color:white;
+    text-align:right;
+    min-width:120px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.5);
+    opacity:0;
+    transition:opacity 0.3s;
+    pointer-events:none;
+}
+#cornerHUD.show{
+    opacity:1;
+    pointer-events:auto;
+}
+#cornerHUD .clock{
+    font-size:28px;
+    font-weight:bold;
+    line-height:1;
+    letter-spacing:1px;
+}
+#cornerHUD .dist-label{
+    font-size:11px;
+    opacity:0.6;
+    margin-top:6px;
+    text-transform:uppercase;
+}
+#cornerHUD .dist-val{
+    font-size:20px;
+    font-weight:bold;
+}
+#cornerHUD .eta-label{
+    font-size:11px;
+    opacity:0.6;
+    margin-top:4px;
+    text-transform:uppercase;
+}
+#cornerHUD .eta-val{
+    font-size:16px;
+    font-weight:bold;
+    color:#00e89d;
+}
+
+/* ===== Bottom info bar (speed / arrival) ===== */
+#bottomBar{
+    position:absolute;
+    bottom:15px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:1100;
+    background:rgba(28,31,42,0.92);
+    backdrop-filter:blur(8px);
+    border-radius:14px;
+    display:flex;
+    align-items:center;
+    gap:18px;
+    padding:10px 22px;
+    box-shadow:0 2px 12px rgba(0,0,0,0.5);
+    color:white;
+    opacity:0;
+    transition:opacity 0.3s;
+    pointer-events:none;
+}
+#bottomBar.show{
+    opacity:1;
+    pointer-events:auto;
+}
+#bottomBar .speed{
+    font-size:32px;
+    font-weight:bold;
+    line-height:1;
+}
+#bottomBar .speed span{
+    font-size:13px;
+    font-weight:normal;
+    display:block;
+    opacity:0.7;
+}
+#bottomBar .eta{
+    font-size:13px;
+    opacity:0.8;
+}
+#bottomBar .eta b{
+    font-size:16px;
+    display:block;
+    opacity:1;
+}
+
+/* User arrow marker */
+.user-arrow{
+    width:30px;
+    height:30px;
+}
+
+/* Voice toast */
+#voiceToast{
+    position:absolute;
+    bottom:80px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:1200;
+    background:rgba(0,119,255,0.9);
+    color:white;
+    padding:8px 18px;
+    border-radius:20px;
+    font-size:13px;
+    opacity:0;
+    transition:opacity 0.3s;
+    pointer-events:none;
+    white-space:nowrap;
+}
+#voiceToast.show{
+    opacity:1;
 }
 </style>
 </head>
 
 <body>
 
+<!-- TomTom-style top notification bar -->
+<div id="topBar">
+    <div class="arrow" id="topArrow">⬆</div>
+    <div class="info">
+        <div class="street" id="topStreet">—</div>
+    </div>
+    <div class="distance" id="topDist">—</div>
+</div>
+
+<!-- Corner HUD: clock, distance, ETA -->
+<div id="cornerHUD">
+    <div class="clock" id="hudClock">00:00</div>
+    <div class="dist-label">Pozostało</div>
+    <div class="dist-val" id="hudDist">— km</div>
+    <div class="eta-label">Przyjazd o</div>
+    <div class="eta-val" id="hudETA">—:—</div>
+</div>
+
+<!-- Bottom bar: speed + ETA -->
+<div id="bottomBar">
+    <div class="speed" id="speedDisplay">0<span>km/h</span></div>
+    <div class="eta" id="etaDisplay">Przybycie<b>—</b></div>
+</div>
+
+<!-- Voice toast -->
+<div id="voiceToast">🔊 —</div>
+
+<!-- Hamburger -->
+<button id="menuBtn" onclick="toggleMenu()">
+    <span class="bar"></span>
+    <span class="bar"></span>
+    <span class="bar"></span>
+</button>
+
+<!-- Panel -->
 <div id="panel">
-    <h3>Nawigacja</h3>
-    <input id="dest" placeholder="Wpisz cel">
-    <button onclick="startNav()">Start</button>
-    <button class="stop" onclick="stopNav()">Stop</button>
+    <h3>🧭 Nawigacja</h3>
+    <input id="dest" placeholder="np. Kraków, Rynek Główny 1" autocomplete="off">
+    <button onclick="startNav()">▶ Start</button>
+    <button class="stop" onclick="stopNav()">⏹ Stop</button>
+    <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🔊 Powiadomienia głosowe: ON</button>
 </div>
 
 <div id="map"></div>
@@ -78,73 +345,363 @@ button.stop{
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 
 <script>
-let map = L.map('map').setView([50.06, 19.94], 13);
+// ===== MENU =====
+function toggleMenu(){
+    document.getElementById("panel").classList.toggle("open");
+    document.getElementById("menuBtn").classList.toggle("open");
+}
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: 'OSM'
-}).addTo(map);
+// ===== VOICE (Speech Synthesis) =====
+let voiceEnabled = true;
+let lastSpokenIdx = -1;
+
+function toggleVoice(){
+    voiceEnabled = !voiceEnabled;
+    const btn = document.getElementById("voiceBtn");
+    btn.textContent = voiceEnabled ? "🔊 Powiadomienia głosowe: ON" : "🔇 Powiadomienia głosowe: OFF";
+    btn.classList.toggle("muted", !voiceEnabled);
+}
+
+function speak(text){
+    if(!voiceEnabled || !text) return;
+    // Cancel any ongoing speech
+    if(window.speechSynthesis.speaking) window.speechSynthesis.cancel();
+
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = "pl-PL";
+    utt.rate = 1.05;
+    utt.pitch = 1.0;
+    utt.volume = 1.0;
+
+    // Show toast
+    const toast = document.getElementById("voiceToast");
+    toast.textContent = "🔊 " + text;
+    toast.classList.add("show");
+    utt.onend = ()=> toast.classList.remove("show");
+    utt.onerror = ()=> toast.classList.remove("show");
+
+    window.speechSynthesis.speak(utt);
+}
+
+// ===== MAP =====
+let map = L.map('map',{
+    zoomControl:false,
+    rotate:true,
+    rotateControl:false
+}).setView([51.5,-0.09],5);
+
+// Tiles disabled to save mobile data — black background
+// Uncomment below to re-enable map tiles:
+// L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+//     attribution:'© OpenStreetMap'
+// }).addTo(map);
+
+L.control.zoom({position:'bottomright'}).addTo(map);
 
 let userPos = null;
 let destination = null;
+let destinationName = '';
 let routeControl = null;
 let userMarker = null;
+let gpsCentered = false;
+let lastLat = null, lastLng = null, lastTime = null;
+let currentBearing = 0;
+let currentSpeed = 0;
+let navigationActive = false;
+let currentStreet = '';
+let nextDistance = '';
+let routeInstructions = [];
+let instructionIndex = 0;
+let totalRouteDist = 0; // km
+
+// ===== Clock in HUD =====
+function updateClock(){
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    document.getElementById("hudClock").textContent = h+':'+m;
+}
+setInterval(updateClock, 10000);
+updateClock();
+
+// ===== User arrow SVG marker =====
+function createArrowIcon(bearing){
+    return L.divIcon({
+        className:'',
+        html:`<svg class="user-arrow" viewBox="0 0 30 30" style="transform:rotate(${bearing}deg)">
+            <circle cx="15" cy="15" r="13" fill="#0077ff" stroke="white" stroke-width="2.5"/>
+            <polygon points="15,4 21,22 15,18 9,22" fill="white"/>
+        </svg>`,
+        iconSize:[30,30],
+        iconAnchor:[15,15]
+    });
+}
+
+// ===== Bearing calculation =====
+function calcBearing(lat1,lng1,lat2,lng2){
+    const dLng = (lng2-lng1)*Math.PI/180;
+    const y = Math.sin(dLng)*Math.cos(lat2*Math.PI/180);
+    const x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180)
+             -Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLng);
+    return ((Math.atan2(y,x)*180/Math.PI)+360)%360;
+}
+
+function calcSpeed(lat1,lng1,t1,lat2,lng2,t2){
+    const R=6371;
+    const dLat=(lat2-lat1)*Math.PI/180;
+    const dLng=(lng2-lng1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    const d=2*R*Math.asin(Math.sqrt(a));
+    const dt=(t2-t1)/1000;
+    if(dt<0.5) return 0;
+    return d/dt*3600;
+}
+
+function haversine(lat1,lng1,lat2,lng2){
+    const R=6371;
+    const dLat=(lat2-lat1)*Math.PI/180;
+    const dLng=(lng2-lng1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+}
+
+// ===== Rotate map =====
+let mapBearing = 0;
+function rotateMap(deg){
+    mapBearing = deg;
+    const mapEl = document.getElementById('map');
+    mapEl.style.transform = `rotate(${-deg}deg)`;
+}
+
+// ===== Show / hide UI elements =====
+const topBar   = document.getElementById('topBar');
+const topArrow = document.getElementById('topArrow');
+const topStreet= document.getElementById('topStreet');
+const topDist  = document.getElementById('topDist');
+const bottomBar = document.getElementById('bottomBar');
+const cornerHUD = document.getElementById('cornerHUD');
+
+const arrowChars = ['⬆','↗','➡','↘','⬇','↙','⬅','↖'];
+function bearingToArrow(b){
+    const idx = Math.round(b/45)%8;
+    return arrowChars[idx];
+}
+
+function showTopBar(instruction, distance){
+    topArrow.textContent = bearingToArrow(instruction.bearing||0);
+    topStreet.textContent = instruction.text || '—';
+    topDist.textContent = distance || '';
+    topBar.classList.add('show');
+}
+function hideTopBar(){ topBar.classList.remove('show'); }
+
+function showBottomBar(){ bottomBar.classList.add('show'); }
+function hideBottomBar(){ bottomBar.classList.remove('show'); }
+
+function showCornerHUD(){ cornerHUD.classList.add('show'); }
+function hideCornerHUD(){ cornerHUD.classList.remove('show'); }
+
+// ===== Format arrival time =====
+function formatArrivalTime(minutesFromNow){
+    const d = new Date(Date.now() + minutesFromNow*60000);
+    const h = String(d.getHours()).padStart(2,'0');
+    const m = String(d.getMinutes()).padStart(2,'0');
+    return h+':'+m;
+}
 
 // ===== GPS =====
 navigator.geolocation.watchPosition(pos => {
 
-    userPos = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const heading = pos.coords.heading;
+    const now = Date.now();
 
-    if (!userMarker) {
-        userMarker = L.circleMarker(userPos, {
-            radius: 8,
-            color: "#00a2ff",
-            fillColor: "#00a2ff",
-            fillOpacity: 1
+    userPos = L.latLng(lat,lng);
+
+    // Calculate bearing & speed from movement
+    if(lastLat!==null && lastLng!==null && lastTime!==null){
+        const dt = (now - lastTime)/1000;
+        if(dt > 0.5){
+            const bearing = calcBearing(lastLat,lastLng,lat,lng);
+            const speed = calcSpeed(lastLat,lastLng,lastTime,lat,lng,now);
+            currentSpeed = speed;
+            if(speed > 1.5){
+                currentBearing = bearing;
+            }
+            updateSpeed(speed);
+            lastLat = lat; lastLng = lng; lastTime = now;
+        }
+    } else {
+        lastLat = lat; lastLng = lng; lastTime = now;
+    }
+
+    // Use device heading if available
+    if(heading && !isNaN(heading) && heading !== 0){
+        currentBearing = heading;
+    }
+
+    // Update user marker
+    if(!userMarker){
+        userMarker = L.marker(userPos,{
+            icon:createArrowIcon(currentBearing),
+            zIndexOffset:1000
         }).addTo(map);
     } else {
         userMarker.setLatLng(userPos);
+        userMarker.setIcon(createArrowIcon(currentBearing));
     }
 
-    if (routeControl && destination) {
-        routeControl.setWaypoints([userPos, destination]);
+    // Center on first fix
+    if(!gpsCentered){
+        gpsCentered = true;
+        map.setView(userPos,15);
     }
 
-}, err => console.log(err), {
+    // During navigation
+    if(navigationActive){
+        map.setView(userPos,15);
+        rotateMap(currentBearing);
+        checkRouteProximity(lat,lng);
+    }
+
+    if(routeControl && destination){
+        routeControl.setWaypoints([userPos,destination]);
+    }
+
+}, err=>{
+    console.log("GPS error:",err);
+    if(!gpsCentered){
+        gpsCentered=true;
+        map.setView([50.06,19.94],15);
+    }
+},{
     enableHighAccuracy:true,
     maximumAge:1000
 });
 
+// ===== Speed display =====
+function updateSpeed(kmh){
+    document.getElementById("speedDisplay").innerHTML =
+        `${Math.round(kmh)}<span>km/h</span>`;
+}
+
+// ===== Check proximity to route & show notifications =====
+function checkRouteProximity(lat,lng){
+    if(!routeInstructions.length) return;
+
+    // Find nearest instruction ahead
+    let bestIdx = instructionIndex;
+    let bestDist = Infinity;
+    for(let i=instructionIndex;i<routeInstructions.length;i++){
+        const inst = routeInstructions[i];
+        const d = haversine(lat,lng,inst.lat,inst.lng);
+        if(d < bestDist){
+            bestDist = d;
+            bestIdx = i;
+        }
+    }
+    if(bestIdx > instructionIndex){
+        instructionIndex = bestIdx;
+    }
+
+    const inst = routeInstructions[instructionIndex];
+    if(!inst) return;
+
+    const dist = haversine(lat,lng,inst.lat,inst.lng);
+
+    // Format distance
+    let distStr;
+    if(dist < 1){
+        distStr = Math.round(dist*1000)+' m';
+    } else {
+        distStr = dist.toFixed(1)+' km';
+    }
+
+    // Calculate remaining distance (sum from current instruction to end)
+    let remainDist = 0;
+    for(let i=instructionIndex;i<routeInstructions.length-1;i++){
+        remainDist += haversine(
+            routeInstructions[i].lat, routeInstructions[i].lng,
+            routeInstructions[i+1].lat, routeInstructions[i+1].lng
+        );
+    }
+    // Add remaining from current pos to next instruction
+    if(instructionIndex < routeInstructions.length){
+        remainDist += dist;
+    }
+
+    // ETA based on current speed
+    let etaMin = 0;
+    let etaArrival = '—:—';
+    if(currentSpeed > 2){
+        etaMin = (remainDist / currentSpeed) * 60;
+        etaArrival = formatArrivalTime(etaMin);
+    }
+
+    // Update corner HUD
+    let remainStr;
+    if(remainDist < 1){
+        remainStr = Math.round(remainDist*1000)+' m';
+    } else {
+        remainStr = remainDist.toFixed(1)+' km';
+    }
+    document.getElementById("hudDist").textContent = remainStr;
+    document.getElementById("hudETA").textContent = etaArrival;
+
+    // Update bottom bar
+    if(currentSpeed > 2){
+        document.getElementById("etaDisplay").innerHTML =
+            `Przybycie<b>${etaArrival} (${Math.round(etaMin)} min)</b>`;
+    }
+
+    showTopBar(inst, distStr);
+
+    // Voice notification — speak when entering new instruction zone
+    if(instructionIndex !== lastSpokenIdx){
+        lastSpokenIdx = instructionIndex;
+        let voiceText = '';
+        if(inst.text === 'Dotrzyj do celu'){
+            voiceText = `Za ${distStr} dotrzesz do celu: ${destinationName || 'cel'}`;
+        } else {
+            voiceText = `Za ${distStr}, ${inst.text}`;
+        }
+        speak(voiceText);
+    }
+}
+
 // ===== START =====
 function startNav(){
     const q = document.getElementById("dest").value;
-    if(!q) return alert("Wpisz cel");
-    if(!userPos) return alert("Brak GPS");
+    if(!q) return alert("Wpisz cel podróży");
+    if(!userPos) return alert("Oczekiwanie na sygnał GPS…");
 
     fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`)
     .then(r=>r.json())
     .then(data=>{
 
-        if(!data.length) return alert("Nie znaleziono");
+        if(!data.length) return alert("Nie znaleziono lokalizacji");
 
-        destination = L.latLng(data[0].lat, data[0].lon);
-
-        map.setView(destination, 13);
+        destination = L.latLng(data[0].lat,data[0].lon);
+        destinationName = data[0].display_name.split(',')[0] || q;
+        map.setView(destination,15);
 
         drawRoute();
 
+        // Speak start
+        speak(`Nawigacja uruchomiona. Kieruj się do ${destinationName}`);
     });
 }
 
 // ===== ROUTE =====
 function drawRoute(){
-
     if(routeControl){
         map.removeControl(routeControl);
     }
 
     routeControl = L.Routing.control({
         waypoints:[userPos,destination],
-        router: L.Routing.osrmv1({
+        router:L.Routing.osrmv1({
             serviceUrl:"https://router.project-osrm.org/route/v1"
         }),
         addWaypoints:false,
@@ -154,21 +711,88 @@ function drawRoute(){
         lineOptions:{
             styles:[{color:"#00f3ff",weight:6}]
         },
-        createMarker: ()=>null
+        createMarker:()=>null
     }).addTo(map);
+
+    routeControl.on('routesfound',function(e){
+        if(e.routes && e.routes.length){
+            const route = e.routes[0];
+            totalRouteDist = route.summary.totalDistance / 1000; // meters -> km
+            extractInstructions(route);
+        }
+    });
+
+    navigationActive = true;
+    lastSpokenIdx = -1;
+    showBottomBar();
+    showCornerHUD();
+    instructionIndex = 0;
+}
+
+// ===== Extract turn-by-turn from route =====
+function extractInstructions(route){
+    routeInstructions = [];
+    const coords = route.coordinates;
+    if(!coords || !coords.length) return;
+
+    const step = Math.max(1, Math.floor(coords.length / 20));
+    for(let i=0;i<coords.length;i+=step){
+        const c = coords[i];
+        const nextC = coords[Math.min(i+step, coords.length-1)];
+        const bearing = calcBearing(c.lat,c.lng,nextC.lat,nextC.lng);
+        const streetName = getBearingName(bearing);
+        routeInstructions.push({
+            lat:c.lat,
+            lng:c.lng,
+            bearing:bearing,
+            text:`Kieruj się ${streetName}`,
+            index:i
+        });
+    }
+    const last = coords[coords.length-1];
+    routeInstructions.push({
+        lat:last.lat,
+        lng:last.lng,
+        bearing:0,
+        text:'Dotrzyj do celu',
+        index:coords.length-1
+    });
+}
+
+function getBearingName(b){
+    const names=[
+        'na północ','na północny wschód','na wschód','na południowy wschód',
+        'na południe','na południowy zachód','na zachód','na północny zachód'
+    ];
+    const idx=Math.round(b/45)%8;
+    return names[idx];
 }
 
 // ===== STOP =====
 function stopNav(){
-
     destination = null;
+    destinationName = '';
+    navigationActive = false;
+    routeInstructions = [];
+    instructionIndex = 0;
+    lastSpokenIdx = -1;
+    totalRouteDist = 0;
 
     if(routeControl){
         map.removeControl(routeControl);
         routeControl = null;
     }
 
-    alert("Nawigacja zatrzymana");
+    rotateMap(0);
+    hideTopBar();
+    hideBottomBar();
+    hideCornerHUD();
+
+    if(window.speechSynthesis.speaking) window.speechSynthesis.cancel();
+    document.getElementById("voiceToast").classList.remove("show");
+
+    speak("Nawigacja zatrzymana");
+    setTimeout(()=> alert("Nawigacja zatrzymana"), 500);
 }
 </script>
 
