@@ -3,7 +3,10 @@ const CONFIG={
     nominatimUrl:'https://nominatim.openstreetmap.org/search',
     overpassUrl:'https://overpass-api.de/api/interpreter',
     hereApiKey: '', // <-- Wklej tutaj swój klucz HERE API
-    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:500},debounceMs:400,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7
+    weatherApiKey: '', // <-- Wklej tutaj swój klucz OpenWeatherMap API
+    elevationApiUrl: 'https://api.open-elevation.com/api/v1/lookup',
+    hereTrafficUrl: 'https://data.traffic.hereapi.com/v7/incidents',
+    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:500},debounceMs:400,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7
 };
 const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -39,9 +42,14 @@ const appState = {
     spokenCameras500m: new Set(),
     currentSpeedLimit: 0,
     lastSpeedWarnSpoken: 0,
+    trafficIncidents: [],
+    speedLimits: [],
+    routeWeather: [],
+    userIncidents: [],
+    lastTrafficCheck: 0,
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -67,31 +75,32 @@ loadMapTiles();
 
 let trafficLayer = null;
 let trafficInterval = null;
-function toggleTraffic() {
-    settings.trafficEnabled = !settings.trafficEnabled;
-    document.getElementById('trafficToggle').classList.toggle('on', settings.trafficEnabled);
-    saveSettings();
 
-    if (settings.trafficEnabled) {
-        if (!CONFIG.hereApiKey) {
-            alert('Klucz HERE API nie został skonfigurowany. Dodaj go w pliku app.js, aby włączyć warstwę ruchu.');
-            settings.trafficEnabled = false;
-            document.getElementById('trafficToggle').classList.remove('on');
-            saveSettings();
-            return;
-        }
-        trafficLayer = L.tileLayer(`https://{s}.traffic.maps.ls.hereapi.com/maptile/2.1/flowtile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey=${CONFIG.hereApiKey}`, { subdomains: '1234', maxZoom: 20 });
-        trafficLayer.addTo(map);
-        trafficInterval = setInterval(() => trafficLayer.redraw(), 300000); // Odświeżaj co 5 minut
-    } else if (trafficLayer) {
+function updateTrafficLayerStyle() {
+    if (trafficLayer) {
         map.removeLayer(trafficLayer);
         trafficLayer = null;
         if (trafficInterval) clearInterval(trafficInterval);
         trafficInterval = null;
     }
+
+    if (settings.trafficEnabled) {
+        if (!CONFIG.hereApiKey) return; // Silently fail if no key
+        const style = settings.isNightMode ? 'normal.night' : 'normal.day';
+        trafficLayer = L.tileLayer(`https://{s}.traffic.maps.ls.hereapi.com/maptile/2.1/flowtile/newest/${style}/{z}/{x}/{y}/256/png8?apiKey=${CONFIG.hereApiKey}`, { subdomains: '1234', maxZoom: 20 });
+        trafficLayer.addTo(map);
+        trafficInterval = setInterval(() => trafficLayer.redraw(), 300000);
+    }
+}
+
+function toggleTraffic() {
+    settings.trafficEnabled = !settings.trafficEnabled;
+    document.getElementById('trafficToggle').classList.toggle('on', settings.trafficEnabled);
+    saveSettings();
+    updateTrafficLayerStyle();
 }
 function toggleMapTiles(){settings.mapTilesEnabled=!settings.mapTilesEnabled;document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);if(settings.mapTilesEnabled)loadMapTiles();else{if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}document.getElementById('map').style.background=settings.isNightMode?'#111118':'#d8d8e0'}saveSettings()}
-function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);loadMapTiles();if(!settings.mapTilesEnabled)document.getElementById('map').style.background=settings.isNightMode?'#111118':'#d8d8e0';saveSettings()}
+function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);loadMapTiles();if(settings.trafficEnabled){updateTrafficLayerStyle()}if(!settings.mapTilesEnabled)document.getElementById('map').style.background=settings.isNightMode?'#111118':'#d8d8e0';saveSettings()}
 function autoDayNight(){const h=new Date().getHours();const shouldBeNight=h<CONFIG.autoNightEnd||h>=CONFIG.autoNightStart;if(shouldBeNight!==settings.isNightMode)toggleDayNight()}
 setInterval(autoDayNight,60000);
 function createArrowIcon(bearing){return L.divIcon({className:'',html:'<svg class="user-arrow" viewBox="0 0 30 30" style="transform:rotate('+bearing+'deg)"><circle cx="15" cy="15" r="12" fill="#2979ff" stroke="white" stroke-width="2.5" opacity="0.95"/><polygon points="15,4 20,22 15,18 10,22" fill="white"/></svg>',iconSize:[30,30],iconAnchor:[15,15]})}
@@ -143,6 +152,181 @@ function openSettingsSub() {
     document.getElementById('settingsSub').classList.add('open');
 }
 
+function openPoiSettings() {
+    document.getElementById('mainMenu').classList.remove('open');
+    const ssBody = document.getElementById('ssBody');
+    ssBody.innerHTML = '';
+    document.getElementById('ssTitle').textContent = 'Filtrowanie POI';
+
+    const poiSection = createDOMElement('div', { className: 'ss-section' });
+    
+    const uniquePoiTypes = [...new Set(Object.values(osmTypeMap).map(item => item.type))];
+
+    uniquePoiTypes.forEach(type => {
+        if (!settings.poiFilters.hasOwnProperty(type)) {
+            settings.poiFilters[type] = true; // Default to true if not set
+        }
+        const item = createDOMElement('div', { className: 'avoid-item' });
+        const label = createDOMElement('div', { className: 'ai-left', textContent: type.charAt(0).toUpperCase() + type.slice(1) });
+        const toggle = createDOMElement('div', { className: `mm-toggle ${settings.poiFilters[type] ? 'on' : ''}` });
+        toggle.onclick = () => { settings.poiFilters[type] = !settings.poiFilters[type]; toggle.classList.toggle('on'); saveSettings(); renderPOIMarkers(); };
+        item.append(label, toggle);
+        poiSection.appendChild(item);
+    });
+    ssBody.append(poiSection);
+    document.getElementById('settingsSub').classList.add('open');
+}
+
+function openUserIncidentsPanel() {
+    document.getElementById('mainMenu').classList.remove('open');
+    const ssBody = document.getElementById('ssBody');
+    ssBody.innerHTML = '';
+    document.getElementById('ssTitle').textContent = 'Moje zgłoszenia';
+
+    const incidentSection = createDOMElement('div', { className: 'ss-section' });
+    if (appState.userIncidents.length === 0) {
+        incidentSection.innerHTML = '<div class="fav-empty">Brak zgłoszonych zdarzeń.</div>';
+    } else {
+        appState.userIncidents.forEach(incident => {
+            const item = createDOMElement('div', { className: 'fav-item' });
+            const label = createDOMElement('span', { textContent: `${incident.icon} ${incident.name}` });
+            const deleteBtn = createDOMElement('button', { className: 'fav-remove', textContent: 'Usuń' });
+            deleteBtn.onclick = (e) => { e.stopPropagation(); deleteUserIncident(incident.timestamp); };
+            item.append(label, deleteBtn);
+            incidentSection.appendChild(item);
+        });
+    }
+
+    ssBody.append(incidentSection);
+    document.getElementById('settingsSub').classList.add('open');
+}
+
+function openReportPanel() {
+    document.getElementById('reportPanel').classList.add('show');
+    document.getElementById('overlay').classList.add('show');
+}
+
+function closeReportPanel() {
+    document.getElementById('reportPanel').classList.remove('show');
+    document.getElementById('overlay').classList.remove('show');
+}
+
+function reportIncident(type) {
+    if (!appState.userPos) {
+        return alert("Brak sygnału GPS, nie można zgłosić zdarzenia.");
+    }
+
+    const incidentIcons = {
+        camera: '📸',
+        accident: '💥',
+        traffic_jam: '🚗',
+        road_works: '🚧'
+    };
+
+    const newIncident = {
+        lat: appState.userPos.lat,
+        lng: appState.userPos.lng,
+        type: type,
+        icon: incidentIcons[type] || '⚠️',
+        name: `Zgłoszone: ${type}`,
+        timestamp: Date.now()
+    };
+
+    appState.userIncidents.push(newIncident);
+    saveUserIncidents();
+    renderPOIMarkers();
+    closeReportPanel();
+    speak("Dziękujemy za zgłoszenie.");
+}
+
+function openOfflineMaps() {
+    document.getElementById('mainMenu').classList.remove('open');
+    const ssBody = document.getElementById('ssBody');
+    ssBody.innerHTML = '';
+    document.getElementById('ssTitle').textContent = 'Mapy offline';
+
+    const section = createDOMElement('div', { className: 'ss-section' });
+    const downloadBtn = createDOMElement('button', { className: 'search-go', textContent: 'Pobierz widoczny obszar mapy' });
+    downloadBtn.onclick = () => downloadOfflineArea();
+    
+    const progressContainer = createDOMElement('div', { id: 'offlineProgressContainer', style: 'margin-top: 15px; display: none;' });
+    progressContainer.innerHTML = `
+        <div id="offlineProgressLabel">Pobieranie...</div>
+        <div style="background: #555; border-radius: 5px; padding: 2px; margin-top: 5px;">
+            <div id="offlineProgressBar" style="width: 0%; height: 10px; background: var(--primary); border-radius: 3px; transition: width 0.2s;"></div>
+        </div>
+    `;
+
+    section.append(downloadBtn, progressContainer);
+    ssBody.append(section);
+    document.getElementById('settingsSub').classList.add('open');
+}
+
+async function downloadOfflineArea() {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+        return alert('Service Worker nie jest aktywny. Tryb offline nie jest dostępny.');
+    }
+
+    const bounds = map.getBounds();
+    const minZoom = 10;
+    const maxZoom = 17; // Be careful, higher zoom levels mean exponentially more tiles.
+    const regionName = `Obszar_${new Date().toISOString().slice(0, 10)}`;
+
+    const progressContainer = document.getElementById('offlineProgressContainer');
+    const progressBar = document.getElementById('offlineProgressBar');
+    const progressLabel = document.getElementById('offlineProgressLabel');
+
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressLabel.textContent = `Przygotowywanie do pobrania: ${regionName}`;
+
+    const tileUrls = [];
+    for (let z = minZoom; z <= maxZoom; z++) {
+        const minTile = latLonToTile(bounds.getNorthWest(), z);
+        const maxTile = latLonToTile(bounds.getSouthEast(), z);
+
+        for (let x = minTile.x; x <= maxTile.x; x++) {
+            for (let y = minTile.y; y <= maxTile.y; y++) {
+                // Add URLs for both day and night mode tiles
+                tileUrls.push(`https://a.tile.openstreetmap.org/${z}/${x}/${y}.png`);
+                tileUrls.push(`https://a.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`);
+            }
+        }
+    }
+
+    progressLabel.textContent = `Pobieranie ${tileUrls.length / 2} kafelków...`;
+
+    navigator.serviceWorker.controller.postMessage({
+        action: 'cache-tiles',
+        urls: tileUrls,
+        regionName: regionName
+    });
+
+    // Listen for progress updates from the Service Worker
+    const progressListener = (event) => {
+        if (event.data.action === 'cache-progress' && event.data.regionName === regionName) {
+            const progress = event.data.progress;
+            progressBar.style.width = `${progress}%`;
+            if (progress >= 100) {
+                progressLabel.textContent = 'Pobieranie zakończone!';
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                }, 2000);
+                navigator.serviceWorker.removeEventListener('message', progressListener);
+            }
+        }
+    };
+    navigator.serviceWorker.addEventListener('message', progressListener);
+}
+
+function latLonToTile(latlon, zoom) {
+    const latRad = latlon.lat * Math.PI / 180;
+    const n = Math.pow(2, zoom);
+    const x = Math.floor(n * ((latlon.lng + 180) / 360));
+    const y = Math.floor(n * (1 - (Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI)) / 2);
+    return { x, y, z: zoom };
+}
+
 function openSpeedSettings() {
     document.getElementById('mainMenu').classList.remove('open');
     const ssBody = document.getElementById('ssBody');
@@ -184,16 +368,22 @@ function distToRoute(lat,lng){if(!appState.routeCoords.length)return Infinity;le
 function snapToRoute(lat,lng){if(!appState.routeCoords.length)return{lat,lng};let minD=Infinity,snap=appState.routeCoords[0];for(let i=0;i<appState.routeCoords.length-1;i++){const p=appState.routeCoords[i],q=appState.routeCoords[i+1];const dx=q.lng-p.lng,dy=q.lat-p.lat;const len2=dx*dx+dy*dy;if(len2===0){const d=haversine(lat,lng,p.lat,p.lng);if(d<minD){minD=d;snap=p}continue}let t=((lng-p.lng)*dx+(lat-p.lat)*dy)/len2;t=Math.max(0,Math.min(1,t));const snapLat=p.lat+t*dy,snapLng=p.lng+t*dx;const d=haversine(lat,lng,snapLat,snapLng);if(d<minD){minD=d;snap={lat:snapLat,lng:snapLng}}}return snap}
 function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.05;routeCameras=(window.speedCameras||[]).filter(cam=>cam.lat>=minLat-margin&&cam.lat<=maxLat+margin&&cam.lng>=minLng-margin&&cam.lng<=maxLng+margin&&distToRoute(cam.lat,cam.lng)<0.5);loadOSMPOIs(minLat,maxLat,minLng,maxLng)}
 const osmTypeMap={
-    amenity_fuel:{icon:'⛽',type:'fuel'},
+    'brand_Orlen': { icon: 'OR', type: 'fuel', style: { backgroundColor: '#e11b22', color: 'white' } },
+    'brand_Shell': { icon: 'SH', type: 'fuel', style: { backgroundColor: '#ffdd00', color: '#d90f17' } },
+    'brand_BP': { icon: 'BP', type: 'fuel', style: { backgroundColor: '#009a3d', color: '#ffde00' } },
+    'brand_Circle K': { icon: 'CK', type: 'fuel', style: { backgroundColor: '#d92d30', color: 'white' } },
+
+    // Generic types
+    'amenity_fuel':{icon:'⛽',type:'fuel'},
     amenity_parking:{icon:'🅿️',type:'parking'},
     amenity_restaurant:{icon:'🍽️',type:'restaurant'},
     amenity_cafe:{icon:'☕',type:'cafe'},
     amenity_hospital:{icon:'🏥',type:'danger'},
     amenity_pharmacy:{icon:'💊',type:'pharmacy'},
-    highway_speed_camera:{icon:'📸',type:'camera', isSpeedCamera: true},
+    'highway_speed_camera':{icon:'📸',type:'camera', isSpeedCamera: true},
     highway_construction:{icon:'🚧',type:'danger'},
     highway_traffic_signals:{icon:'🚦',type:'traffic'},
-    barrier_toll_booth:{icon:'💰',type:'danger'}
+    'barrier_toll_booth':{icon:'💰',type:'danger'}
 };
 let fallbackPOIs = [];
 function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
@@ -203,7 +393,7 @@ function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
     renderPOIMarkers();
 
     const bbox = `(${minLat-0.05},${minLng-0.05},${maxLat+0.05},${maxLng+0.05})`;
-    const poiTags = Object.keys(osmTypeMap).map(tag => `node["${tag.replace('_', '"="')}"]${bbox};`);
+    const poiTags = Object.keys(osmTypeMap).map(tag => `node[${tag.replace('_', '="')}]${bbox};`);
     const query = `[out:json][timeout:25];(${poiTags.join('')});out body;`;
 
     fetch(CONFIG.overpassUrl, { method: 'POST', body: 'data=' + encodeURIComponent(query) })
@@ -215,7 +405,7 @@ function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
             const tags = el.tags || {};
             let poiType = null;
             for (const key in osmTypeMap) {
-                const [tagKey, tagValue] = key.split('_');
+                const [tagKey, tagValue] = key.split(/_(.*)/s); // Split only on the first underscore
                 if (tags[tagKey] === tagValue) {
                     poiType = osmTypeMap[key];
                     break;
@@ -224,7 +414,7 @@ function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
             if (!poiType) return null;
             const name = tags.name || tags.brand || tags.operator || poiType.icon + ' OSM';
             if (distToRoute(el.lat, el.lon) < 0.5) {
-                const poi = { lat: el.lat, lng: el.lon, type: poiType.type, icon: poiType.icon, name };
+                const poi = { lat: el.lat, lng: el.lon, type: poiType.type, icon: poiType.icon, name, style: poiType.style };
                 if (poiType.isSpeedCamera) {
                     poi.limit = parseInt(tags.maxspeed, 10) || 0;
                 }
@@ -243,20 +433,34 @@ function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
     })
     .catch(err => console.error("Failed to load POIs from Overpass API:", err));
 }
+
+function createPoiIcon(poi) {
+    if (poi.style) {
+        const style = `background-color:${poi.style.backgroundColor}; color:${poi.style.color}; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:bold; border: 1px solid rgba(0,0,0,0.2);`;
+        return L.divIcon({
+            className: 'poi-brand-icon',
+            html: `<div style="${style}">${poi.icon}</div>`,
+            iconSize: [24, 24], iconAnchor: [12, 12]
+        });
+    }
+    return L.divIcon({className:'',html:`<div style="font-size:22px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">${poi.icon || '📸'}</div>`,iconSize:[24,24],iconAnchor:[12,12]});
+}
 function renderPOIMarkers(){
     appState.poiMarkers.forEach(m=>map.removeLayer(m));
     appState.poiMarkers=[];
     const renderedCoords = new Set();
 
-    const allPois = [...appState.routePOIs, ...routeCameras];
+    const allPois = [
+        ...appState.routePOIs.filter(p => settings.poiFilters[p.type] !== false), 
+        ...(settings.poiFilters['camera'] !== false ? routeCameras : []), 
+        ...appState.userIncidents];
 
     for(const poi of allPois){
         const coordKey = `${poi.lat.toFixed(4)},${poi.lng.toFixed(4)}`;
         if (renderedCoords.has(coordKey)) continue;
 
         const snapped=snapToRoute(poi.lat,poi.lng);
-        const iconHtml = `<div style="font-size:22px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">${poi.icon || '📸'}</div>`;
-        const icon=L.divIcon({className:'',html:iconHtml,iconSize:[24,24],iconAnchor:[12,12]});
+        const icon = createPoiIcon(poi);
         const m=L.marker([snapped.lat,snapped.lng],{icon}).addTo(map);
         const tooltipText = poi.limit ? `${poi.name} (${poi.limit} km/h)` : poi.name;
         m.bindTooltip(tooltipText,{permanent:false,direction:'top',offset:[0,-8]});
@@ -268,15 +472,111 @@ function checkSpeedCameras(lat,lng,speed){let minDist=Infinity,nearestCam=null;f
 function updateRouteStrip(lat,lng){if(!appState.routeCoords.length||!appState.navigationActive)return;const track=document.getElementById('sbTrack'),progress=document.getElementById('sbProgress');let totalDist=0;const cumDists=[0];for(let i=1;i<appState.routeCoords.length;i++){totalDist+=haversine(appState.routeCoords[i-1].lat,appState.routeCoords[i-1].lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);cumDists.push(totalDist)}if(totalDist===0)return;let minD=Infinity,closestIdx=0;for(let i=0;i<appState.routeCoords.length;i++){const d=haversine(lat,lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);if(d<minD){minD=d;closestIdx=i}}const doneDist=cumDists[closestIdx];progress.style.height=Math.min(100,(doneDist/totalDist)*100)+'%';track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());const lookAhead=5;for(const inst of appState.routeInstructions){if(inst.index<closestIdx)continue;const instDist=haversine(lat,lng,inst.lat,inst.lng);if(instDist>lookAhead)continue;const topPx=(instDist/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot turn">'+bearingToArrow(inst.bearing||0)+'</div>';track.appendChild(m)}for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(d>lookAhead)continue;const topPx=(d/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot camera">📸</div>';track.appendChild(m)}for(const poi of appState.routePOIs){const d=haversine(lat,lng,poi.lat,poi.lng);if(d>lookAhead)continue;const topPx=(d/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot '+poi.type+'">'+poi.icon+'</div>';track.appendChild(m)}const um=document.createElement('div');um.className='sidebar-strip-marker';um.style.top=Math.min(100,(doneDist/totalDist)*100)+'%';um.innerHTML='<div class="icon-dot user">⬆</div>';track.appendChild(um)}
 function debouncedSetView(pos){const now=Date.now();if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;appState.lastMapViewTime=now;appState.lastMapViewPos=pos;map.setView(pos,CONFIG.defaultZoom)}
 navigator.geolocation.watchPosition(pos=>{const lat=pos.coords.latitude,lng=pos.coords.longitude,heading=pos.coords.heading,now=Date.now();appState.userPos=L.latLng(lat,lng);if(appState.lastLat!==null&&appState.lastLng!==null&&appState.lastTime!==null){const dt=(now-appState.lastTime)/1000;if(dt>0.3){const b=calcBearing(appState.lastLat,appState.lastLng,lat,lng);const s=calcSpeed(appState.lastLat,appState.lastLng,appState.lastTime,lat,lng,now);appState.currentSpeed=s;if(s>1.5)appState.currentBearing=b;appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}}else{appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}if(heading&&!isNaN(heading)&&heading!==0)appState.currentBearing=heading;if(!appState.userMarker){appState.userMarker=L.marker(appState.userPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(appState.userPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}if(!appState.gpsCentered){appState.gpsCentered=true;map.setView(appState.userPos,CONFIG.defaultZoom)}if(appState.navigationActive){debouncedSetView(appState.userPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip(lat,lng)}document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0');if(appState.navigationActive&&now-lastGeoTime>30000){lastGeoTime=now;reverseGeocode(lat,lng)}},err=>{console.log("GPS:",err);if(!appState.gpsCentered){appState.gpsCentered=true;map.setView([50.06,19.94],15)}},CONFIG.gpsOptions);
-let lastGeoTime=0;function reverseGeocode(lat,lng){fetch(CONFIG.nominatimUrl+'?format=json&lat='+lat+'&lon='+lng+'&zoom=18&addressdetails=1').then(r=>r.json()).then(data=>{if(data&&data.address){const street=data.address.road||data.address.pedestrian||'';const num=data.address.house_number||'';if(street)document.getElementById('topStreet').textContent=street+(num?' '+num:'')}}).catch(()=>{})}
-function checkRouteProximity(lat,lng){if(!appState.routeInstructions.length)return;let bestIdx=appState.instructionIndex,bestD=Infinity;for(let i=appState.instructionIndex;i<appState.routeInstructions.length;i++){const d=haversine(lat,lng,appState.routeInstructions[i].lat,appState.routeInstructions[i].lng);if(d<bestD){bestD=d;bestIdx=i}}if(bestIdx>appState.instructionIndex)appState.instructionIndex=bestIdx;const inst=appState.routeInstructions[appState.instructionIndex];if(!inst)return;const dist=haversine(lat,lng,inst.lat,inst.lng),distStr=fmtDist(dist);let remain=0;for(let i=appState.instructionIndex;i<appState.routeInstructions.length-1;i++){remain+=haversine(appState.routeInstructions[i].lat,appState.routeInstructions[i].lng,appState.routeInstructions[i+1].lat,appState.routeInstructions[i+1].lng)}remain+=dist;let etaMin=0,etaStr='—:—';if(appState.currentSpeed>2){etaMin=(remain/appState.currentSpeed)*60;etaStr=fmtArrival(etaMin)}const isLast=inst.text==='Dotrzyj do celu';document.getElementById('topArrow').textContent=bearingToArrow(inst.bearing||0);const distParts=distStr.match(/^([\d,.]+)\s*(.*)$/)||[distStr,distStr,''];document.getElementById('topDistNum').textContent=distParts[1];document.getElementById('topDistUnit').textContent=distParts[2];document.getElementById('topStreet').textContent=inst.text||'—';document.getElementById('topBar').classList.add('show');if(appState.instructionIndex+1<appState.routeInstructions.length){const nxt=appState.routeInstructions[appState.instructionIndex+1],nxtDist=haversine(lat,lng,nxt.lat,nxt.lng);document.getElementById('ntArrow').textContent=bearingToArrow(nxt.bearing||0);document.getElementById('ntDist').textContent=fmtDist(nxtDist);document.getElementById('ntText').textContent=nxt.text;document.getElementById('nextTurnHint').classList.add('show')}else document.getElementById('nextTurnHint').classList.remove('show');document.getElementById('statDist').textContent=fmtDist(remain);document.getElementById('statDur').textContent=fmtDuration(etaMin);document.getElementById('speedBar').classList.add('show');document.getElementById('rightSidebar').classList.add('show');document.getElementById('sbDist').textContent=fmtDist(remain);document.getElementById('speedCluster').classList.add('show');for(let i=appState.instructionIndex;i<appState.routeInstructions.length;i++){const ri=appState.routeInstructions[i],riDist=haversine(lat,lng,ri.lat,ri.lng);if(riDist<=CONFIG.preNotifyRange&&riDist>CONFIG.cameraNearRange&&ri.index!==appState.instructionIndex&&!appState.spoken500m.has(i)){appState.spoken500m.add(i);speak(ri.text==='Dotrzyj do celu'?'Za 500 metrów dotrzesz do celu: '+(appState.destinationName||'cel'):'Za 500 metrów, '+ri.text)}}if(appState.nearestCameraDistance<=CONFIG.preNotifyRange&&appState.nearestCameraDistance>CONFIG.cameraNearRange){for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(Math.abs(d-appState.nearestCameraDistance)<0.001&&!appState.spokenCameras500m.has(cam.name)){appState.spokenCameras500m.add(cam.name);speak('Uwaga, za 500 metrów fotoradar, '+cam.limit+' kilometrów na godzinę');break}}}if(appState.instructionIndex!==appState.lastSpokenIdx){appState.lastSpokenIdx=appState.instructionIndex;speak(isLast?'Za '+distStr+' dotrzesz do celu: '+(appState.destinationName||'cel'):'Za '+distStr+', '+inst.text)}}
-function checkRouteProximity(lat,lng){if(!appState.routeInstructions.length)return;let bestIdx=appState.instructionIndex,bestD=Infinity;for(let i=appState.instructionIndex;i<appState.routeInstructions.length;i++){const d=haversine(lat,lng,appState.routeInstructions[i].lat,appState.routeInstructions[i].lng);if(d<bestD){bestD=d;bestIdx=i}}if(bestIdx>appState.instructionIndex)appState.instructionIndex=bestIdx;const inst=appState.routeInstructions[appState.instructionIndex];if(!inst)return;const dist=haversine(lat,lng,inst.lat,inst.lng),distStr=fmtDist(dist);let remain=0;for(let i=appState.instructionIndex;i<appState.routeInstructions.length-1;i++){remain+=haversine(appState.routeInstructions[i].lat,appState.routeInstructions[i].lng,appState.routeInstructions[i+1].lat,appState.routeInstructions[i+1].lng)}remain+=dist;let etaMin=0,etaStr='—:—';if(appState.currentSpeed>2){etaMin=(remain/appState.currentSpeed)*60;etaStr=fmtArrival(etaMin)}const isLast=inst.text==='Dotrzyj do celu';document.getElementById('topArrow').textContent=bearingToArrow(inst.bearing||0);const distParts=distStr.match(/^([\d,.]+)\s*(.*)$/)||[distStr,distStr,''];document.getElementById('topDistNum').textContent=distParts[1];document.getElementById('topDistUnit').textContent=distParts[2];document.getElementById('topStreet').textContent=inst.text||'—';document.getElementById('topBar').classList.add('show');if(appState.instructionIndex+1<appState.routeInstructions.length){const nxt=appState.routeInstructions[appState.instructionIndex+1],nxtDist=haversine(lat,lng,nxt.lat,nxt.lng);document.getElementById('ntArrow').textContent=bearingToArrow(nxt.bearing||0);document.getElementById('ntDist').textContent=fmtDist(nxtDist);document.getElementById('ntText').textContent=nxt.text;document.getElementById('nextTurnHint').classList.add('show')}else document.getElementById('nextTurnHint').classList.remove('show');document.getElementById('statDist').textContent=fmtDist(remain);document.getElementById('statDur').textContent=fmtDuration(etaMin);document.getElementById('statArrival').textContent=etaStr;document.getElementById('speedBar').classList.add('show');document.getElementById('rightSidebar').classList.add('show');document.getElementById('sbDist').textContent=fmtDist(remain);document.getElementById('speedCluster').classList.add('show');for(let i=appState.instructionIndex;i<appState.routeInstructions.length;i++){const ri=appState.routeInstructions[i],riDist=haversine(lat,lng,ri.lat,ri.lng);if(riDist<=CONFIG.preNotifyRange&&riDist>CONFIG.cameraNearRange&&ri.index!==appState.instructionIndex&&!appState.spoken500m.has(i)){appState.spoken500m.add(i);speak(ri.text==='Dotrzyj do celu'?'Za 500 metrów dotrzesz do celu: '+(appState.destinationName||'cel'):'Za 500 metrów, '+ri.text)}}if(appState.nearestCameraDistance<=CONFIG.preNotifyRange&&appState.nearestCameraDistance>CONFIG.cameraNearRange){for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(Math.abs(d-appState.nearestCameraDistance)<0.001&&!appState.spokenCameras500m.has(cam.name)){appState.spokenCameras500m.add(cam.name);speak('Uwaga, za 500 metrów fotoradar, '+cam.limit+' kilometrów na godzinę');break}}}if(appState.instructionIndex!==appState.lastSpokenIdx){appState.lastSpokenIdx=appState.instructionIndex;speak(isLast?'Za '+distStr+' dotrzesz do celu: '+(appState.destinationName||'cel'):'Za '+distStr+', '+inst.text)}}
+let lastGeoTime=0;function reverseGeocode(lat,lng){fetch(CONFIG.nominatimUrl+'?format=json&lat='+lat+'&lon='+lng+'&zoom=18&addressdetails=1').then(r=>r.json()).then(data=>{const streetEl=document.getElementById('currentStreetDisplay');if(data&&data.address){const street=data.address.road||data.address.pedestrian||'';const num=data.address.house_number||'';if(street){streetEl.textContent=street+(num?' '+num:'');streetEl.style.display='block'}else{streetEl.style.display='none'}}else{streetEl.style.display='none'}}).catch(()=>{document.getElementById('currentStreetDisplay').style.display='none'})}
+function checkRouteProximity(lat, lng) {
+    if (!appState.navigationActive || appState.isRerouting) return;
+
+    // Check for off-route condition
+    const distanceFromRoute = distToRoute(lat, lng);
+    if (distanceFromRoute > CONFIG.rerouteThreshold) {
+        appState.isRerouting = true;
+        speak("Zboczyłeś z trasy. Przeliczam.");
+        reroute();
+        return; // Stop further processing until reroute is complete
+    }
+
+    if (!appState.routeInstructions.length) return;
+    let bestIdx = appState.instructionIndex, bestD = Infinity;
+    for (let i = appState.instructionIndex; i < appState.routeInstructions.length; i++) {
+        const d = haversine(lat, lng, appState.routeInstructions[i].lat, appState.routeInstructions[i].lng);
+        if (d < bestD) { bestD = d; bestIdx = i; }
+    }
+    if (bestIdx > appState.instructionIndex) appState.instructionIndex = bestIdx;
+    const inst = appState.routeInstructions[appState.instructionIndex];
+    if (!inst) return;
+
+    // Update speed limit based on current position
+    if (!appState.isRerouting) {
+        updateCurrentSpeedLimit(lat, lng);
+    }
+
+
+
+    const dist = haversine(lat, lng, inst.lat, inst.lng);
+    const isLast = inst.text === 'Dotrzyj do celu';
+
+    if (isLast && dist < CONFIG.cameraNearRange) {
+        speak("Dotarłeś do celu: " + appState.destinationName);
+        stopNav();
+        return;
+    }
+    const distStr = fmtDist(dist);
+    let remain = 0;
+    for (let i = appState.instructionIndex; i < appState.routeInstructions.length - 1; i++) {
+        remain += haversine(appState.routeInstructions[i].lat, appState.routeInstructions[i].lng, appState.routeInstructions[i + 1].lat, appState.routeInstructions[i + 1].lng);
+    }
+    remain += dist;
+    let etaMin = 0, etaStr = '—:—';
+    if (appState.currentSpeed > 2) { etaMin = (remain / appState.currentSpeed) * 60; etaStr = fmtArrival(etaMin); }
+    document.getElementById('topArrow').textContent = bearingToArrow(inst.bearing || 0);
+    const distParts = distStr.match(/^([\d,.]+)\s*(.*)$/) || [distStr, distStr, ''];
+    document.getElementById('topDistNum').textContent = distParts[1];
+    document.getElementById('topDistUnit').textContent = distParts[2];
+    document.getElementById('topStreet').textContent = inst.text || '—';
+
+    const roadBadge = document.getElementById('topRoadBadge');
+    const roadBadgeNum = document.getElementById('topRoadBadgeNum');
+    if (inst.roadRef) {
+        roadBadgeNum.textContent = inst.roadRef.split(';')[0]; // Take the first ref if multiple
+        roadBadge.style.display = 'flex';
+    } else {
+        roadBadge.style.display = 'none';
+    }
+
+    document.getElementById('topBar').classList.add('show');
+    if (appState.instructionIndex + 1 < appState.routeInstructions.length) {
+        const nxt = appState.routeInstructions[appState.instructionIndex + 1], nxtDist = haversine(lat, lng, nxt.lat, nxt.lng);
+        document.getElementById('ntArrow').textContent = bearingToArrow(nxt.bearing || 0);
+        document.getElementById('ntDist').textContent = fmtDist(nxtDist);
+        document.getElementById('ntText').textContent = nxt.text;
+        document.getElementById('nextTurnHint').classList.add('show');
+    } else document.getElementById('nextTurnHint').classList.remove('show');
+    document.getElementById('statDist').textContent = fmtDist(remain);
+    document.getElementById('statDur').textContent = fmtDuration(etaMin);
+    document.getElementById('statArrival').textContent = etaStr;
+    document.getElementById('speedBar').classList.add('show');
+    document.getElementById('rightSidebar').classList.add('show');
+    document.getElementById('sbDist').textContent = fmtDist(remain);
+    document.getElementById('speedCluster').classList.add('show');
+    for (let i = appState.instructionIndex; i < appState.routeInstructions.length; i++) {
+        const ri = appState.routeInstructions[i], riDist = haversine(lat, lng, ri.lat, ri.lng);
+        if (riDist <= CONFIG.preNotifyRange && riDist > CONFIG.cameraNearRange && ri.index !== appState.instructionIndex && !appState.spoken500m.has(i)) {
+            appState.spoken500m.add(i);
+            speak(ri.text === 'Dotrzyj do celu' ? 'Za 500 metrów dotrzesz do celu: ' + (appState.destinationName || 'cel') : 'Za 500 metrów, ' + ri.text);
+        }
+    }
+    if (appState.nearestCameraDistance <= CONFIG.preNotifyRange && appState.nearestCameraDistance > CONFIG.cameraNearRange) {
+        for (const cam of routeCameras) {
+            const d = haversine(lat, lng, cam.lat, cam.lng);
+            if (Math.abs(d - appState.nearestCameraDistance) < 0.001 && !appState.spokenCameras500m.has(cam.name)) {
+                appState.spokenCameras500m.add(cam.name);
+                speak('Uwaga, za 500 metrów fotoradar, ' + cam.limit + ' kilometrów na godzinę');
+                break;
+            }
+        }
+    }
+    if (appState.instructionIndex !== appState.lastSpokenIdx) {
+        appState.lastSpokenIdx = appState.instructionIndex;
+        speak(isLast ? 'Za ' + distStr + ' dotrzesz do celu: ' + (appState.destinationName || 'cel') : 'Za ' + distStr + ', ' + inst.text);
+    }
+}
 function startNav() {
     const q = document.getElementById('dest').value;
     if (!q) return alert("Wpisz cel podróży");
     if (!appState.userPos) return alert("Oczekiwanie na GPS…");
     showLoading('Wyznaczanie trasy...');
 
+    addToSearchHistory(q);
     // If a destination is already selected from autocomplete, use it
     if (appState.destination && appState.destinationName) {
         drawRoute();
@@ -362,6 +662,7 @@ function extractInstructionsFromSteps(osrmRoute) {
             const { location, modifier = '', type = '', bearing_after = 0 } = step.maneuver;
             const [lng, lat] = location;
             const name = step.name || '';
+            const ref = step.ref || '';
             let text = name;
 
             if (maneuverMap[type]) {
@@ -370,7 +671,7 @@ function extractInstructionsFromSteps(osrmRoute) {
                  text = `Skręć ${modifier.includes('left') ? 'w lewo' : 'w prawo'}${name ? ' w ' + name : ''}`;
             }
 
-            const instruction = { lat, lng, bearing: bearing_after, text, index: Math.round((step.geometry?.coordinates.length || 0) / 2) };
+            const instruction = { lat, lng, bearing: bearing_after, text, roadRef: ref, index: Math.round((step.geometry?.coordinates.length || 0) / 2) };
 
             const lastIntersection = step.intersections?.[step.intersections.length - 1];
             if (lastIntersection && lastIntersection.lanes) {
@@ -383,6 +684,76 @@ function extractInstructionsFromSteps(osrmRoute) {
         const last = appState.routeCoords[appState.routeCoords.length - 1];
         appState.routeInstructions.push({ lat: last.lat, lng: last.lng, bearing: 0, text: 'Dotrzyj do celu', index: appState.routeCoords.length - 1 });
     }
+}
+
+function updateCurrentSpeedLimit(lat, lng) {
+    // Speed camera limits have priority
+    if (appState.nearestCameraDistance < CONFIG.cameraShowRange) {
+        return;
+    }
+
+    let closestLimit = null;
+    let minD = Infinity;
+
+    for (const segment of appState.speedLimits) {
+        for (const node of segment.nodes) {
+            const d = haversine(lat, lng, node.lat, node.lon);
+            if (d < minD) {
+                minD = d;
+                closestLimit = segment.limit;
+            }
+        }
+    }
+
+    if (minD < 0.1) { // If we are close to a segment with a known limit
+        appState.currentSpeedLimit = closestLimit;
+    }
+}
+
+async function fetchTrafficIncidents() {
+    if (!settings.trafficEnabled || !CONFIG.hereApiKey || !appState.routeCoords.length) {
+        appState.trafficIncidents = [];
+        return;
+    }
+
+    const now = Date.now();
+    if (now - appState.lastTrafficCheck < 120000) return; // Check every 2 minutes
+    appState.lastTrafficCheck = now;
+
+    // Create a bounding box for the remaining route
+    const remainingCoords = appState.routeCoords.slice(appState.instructionIndex > 0 ? appState.routeInstructions[appState.instructionIndex - 1].index : 0);
+    if (remainingCoords.length < 2) return;
+
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    remainingCoords.forEach(c => {
+        if (c.lat < minLat) minLat = c.lat;
+        if (c.lat > maxLat) maxLat = c.lat;
+        if (c.lng < minLng) minLng = c.lng;
+        if (c.lng > maxLng) maxLng = c.lng;
+    });
+
+    const margin = 0.1; // 10km margin
+    const bbox = `${maxLat + margin},${minLng - margin};${minLat - margin},${maxLng + margin}`;
+    const url = `${CONFIG.hereTrafficUrl}?in=bbox:${bbox}&apiKey=${CONFIG.hereApiKey}`;
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.incidents) {
+            appState.trafficIncidents = data.incidents
+                .filter(inc => inc.geometry && inc.geometry.geometries)
+                .map(inc => {
+                    const coords = inc.geometry.geometries[0].coordinates[0];
+                    return {
+                        lat: coords[1],
+                        lng: coords[0],
+                        description: inc.description,
+                        icon: '🚗',
+                        type: 'traffic'
+                    };
+                }).filter(inc => distToRoute(inc.lat, inc.lng) < 0.5); // Filter incidents on our route
+        }
+    } catch (e) { console.error("Failed to fetch traffic incidents:", e); }
 }
 
 async function reroute() {
@@ -459,6 +830,43 @@ function renderLaneGuidance(lanes) {
     laneBar.style.display = 'flex';
 }
 
+function getWeatherIcon(weatherId) {
+    if (weatherId >= 200 && weatherId < 300) return '⛈️'; // Thunderstorm
+    if (weatherId >= 300 && weatherId < 400) return '🌦️'; // Drizzle
+    if (weatherId >= 500 && weatherId < 600) return '🌧️'; // Rain
+    if (weatherId >= 600 && weatherId < 700) return '❄️'; // Snow
+    if (weatherId >= 700 && weatherId < 800) return '🌫️'; // Atmosphere
+    if (weatherId === 800) return '☀️'; // Clear
+    if (weatherId > 800) return '☁️'; // Clouds
+    return '';
+}
+
+async function fetchWeather(lat, lon) {
+    if (!CONFIG.weatherApiKey) {
+        console.log("Weather API key not set. Skipping weather fetch.");
+        return;
+    }
+    const weatherEl = document.getElementById('rcWeather');
+    weatherEl.textContent = 'Pobieranie pogody...';
+
+    try {
+        const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${CONFIG.weatherApiKey}&units=metric&lang=pl`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.cod !== 200) {
+            weatherEl.textContent = 'Błąd pogody';
+            return;
+        }
+        const icon = getWeatherIcon(data.weather[0].id);
+        const temp = Math.round(data.main.temp);
+        weatherEl.innerHTML = `${icon} ${temp}°C w ${data.name}`;
+    } catch (e) {
+        weatherEl.textContent = 'Błąd pogody';
+        console.error("Failed to fetch weather:", e);
+    }
+}
+
 function displayRouteChoices(routes) {
     closeMainMenu();
     const choiceList = document.getElementById('routeChoiceList');
@@ -480,12 +888,70 @@ function displayRouteChoices(routes) {
         
         const duration = fmtDuration(route.duration / 60);
         const distance = fmtDist(route.distance / 1000);
-        card.innerHTML = `<div class="rc-duration">${duration}</div><div class="rc-distance">${distance}</div>`;
+        card.innerHTML = `<div class="rc-info"><div class="rc-duration">${duration}</div><div class="rc-distance">${distance}</div></div><div class="rc-elevation-chart" id="elevation-chart-${index}"></div>`;
         choiceList.appendChild(card);
+        fetchElevationProfile(route, index);
     });
 
+    fetchWeather(appState.destination.lat, appState.destination.lng);
     map.fitBounds(appState.alternativeRouteLines[0].getBounds(), { padding: [50, 50] });
     document.getElementById('routeChoicePanel').classList.add('show');
+}
+
+function downsampleRoute(coords, maxPoints) {
+    if (coords.length <= maxPoints) return coords;
+    const step = Math.floor(coords.length / maxPoints);
+    return coords.filter((_, i) => i % step === 0);
+}
+
+async function fetchElevationProfile(route, index) {
+    const chartContainer = document.getElementById(`elevation-chart-${index}`);
+    if (!chartContainer) return;
+
+    const downsampledCoords = downsampleRoute(route.geometry.coordinates, CONFIG.elevationDownsample);
+    const locations = downsampledCoords.map(c => ({ latitude: c[1], longitude: c[0] }));
+
+    try {
+        const response = await fetch(CONFIG.elevationApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ locations })
+        });
+        const data = await response.json();
+        if (data.results) {
+            renderElevationChart(data.results.map(r => r.elevation), chartContainer);
+        }
+    } catch (e) {
+        console.error("Failed to fetch elevation data:", e);
+    }
+}
+
+function renderElevationChart(elevationData, container) {
+    const width = container.clientWidth;
+    const height = container.clientHeight || 50; // Default height
+    const minElev = Math.min(...elevationData);
+    const maxElev = Math.max(...elevationData);
+    const elevRange = maxElev - minElev;
+
+    const points = elevationData.map((el, i) => {
+        const x = (i / (elevationData.length - 1)) * width;
+        const y = height - ((el - minElev) / elevRange) * height;
+        return `${x},${y}`;
+    }).join(' ');
+
+    const svg = `
+        <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+            <defs>
+                <linearGradient id="elevationGradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.4"/>
+                    <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.1"/>
+                </linearGradient>
+            </defs>
+            <polygon fill="url(#elevationGradient)" points="0,${height} ${points} ${width},${height}"/>
+            <polyline fill="none" stroke="var(--primary)" stroke-width="2" points="${points}"/>
+        </svg>
+    `;
+    container.innerHTML = svg;
 }
 
 function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
@@ -506,6 +972,9 @@ function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
     
     extractInstructionsFromSteps(selectedRoute);
     loadExternalData().then(() => {
+        fetchSpeedLimitsForRoute(appState.routeCoords);
+        fetchRouteWeatherForecast(selectedRoute);
+        fetchTrafficIncidents();
         loadRouteCameras();
     });
 
@@ -522,7 +991,7 @@ function cancelRouteChoice() {
     openMainMenu();
 }
 
-function stopNav(){Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],spoken500m:new Set(),spokenCameras500m:new Set()});routeCameras=[];appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];rotateMap(0);['topBar','speedBar','rightSidebar','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")}
+function stopNav(){Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set()});routeCameras=[];appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")}
 
 let favorites = [];
 function loadFavorites() { try { favorites = JSON.parse(localStorage.getItem('naviFavorites')) || []; } catch (e) { favorites = []; } renderFavorites(); }
@@ -563,6 +1032,38 @@ function toggleFavorites() {
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
     saveSettings();
 }
+
+let searchHistory = [];
+function loadSearchHistory() { try { searchHistory = JSON.parse(localStorage.getItem('naviSearchHistory')) || []; } catch (e) { searchHistory = []; } renderSearchHistory(); }
+function saveSearchHistory() { try { localStorage.setItem('naviSearchHistory', JSON.stringify(searchHistory)); } catch (e) { console.error("Failed to save search history:", e); } }
+function addToSearchHistory(query) {
+    // Remove if already exists to move it to the top
+    searchHistory = searchHistory.filter(item => item !== query);
+    // Add to the beginning
+    searchHistory.unshift(query);
+    // Keep only the last 10 entries
+    if (searchHistory.length > 10) {
+        searchHistory.pop();
+    }
+    saveSearchHistory();
+    renderSearchHistory();
+}
+function renderSearchHistory() {
+    const listEl = document.getElementById('searchHistoryList');
+    listEl.innerHTML = '';
+    if (searchHistory.length === 0) {
+        listEl.innerHTML = '<div class="fav-empty">Brak historii wyszukiwania.</div>';
+        return;
+    }
+    searchHistory.forEach(query => {
+        const item = createDOMElement('div', { className: 'fav-item', textContent: query, onclick: () => { document.getElementById('dest').value = query; startNav(); closeMainMenu(); } });
+        listEl.appendChild(item);
+    });
+}
+function toggleSearchHistory() { settings.searchHistoryCollapsed = !settings.searchHistoryCollapsed; document.getElementById('searchHistorySection').classList.toggle('collapsed', settings.searchHistoryCollapsed); saveSettings(); }
+
+function loadUserIncidents() { try { appState.userIncidents = JSON.parse(localStorage.getItem('naviUserIncidents')) || []; } catch (e) { appState.userIncidents = []; } }
+function saveUserIncidents() { try { localStorage.setItem('naviUserIncidents', JSON.stringify(appState.userIncidents)); } catch (e) { console.error("Failed to save user incidents:", e); } }
 
 function debounce(func, delay) {
     let timeout;
@@ -623,6 +1124,29 @@ destInput.addEventListener('input', (e) => {
     handleSearchInput(e.target.value);
 });
 
+function resumeLastRoute(savedRoute) {
+    appState.destination = savedRoute.destination;
+    appState.destinationName = savedRoute.destinationName;
+    
+    // Use a simplified selectRoute logic to restore state
+    const selectedRoute = savedRoute.routeData;
+    appState.totalRouteDist = selectedRoute.distance / 1000;
+    appState.routeCoords = selectedRoute.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+    appState.routeLine = L.polyline(appState.routeCoords.map(c => [c.lat, c.lng]), { color: '#2979ff', weight: 6, opacity: 0.85 }).addTo(map);
+    
+    extractInstructionsFromSteps(selectedRoute);
+    loadExternalData().then(() => loadRouteCameras());
+    fetchSpeedLimitsForRoute(appState.routeCoords);
+    fetchRouteWeatherForecast(selectedRoute);
+    fetchTrafficIncidents();
+
+    appState.navigationActive = true;
+    Object.assign(appState, { lastSpokenIdx: -1, instructionIndex: 0, spoken500m: new Set(), spokenCameras500m: new Set() });
+    
+    closeMainMenu();
+    speak('Wznowiono nawigację do: ' + appState.destinationName);
+}
+
 function initApp() {
     if(!settings.isNightMode)document.body.classList.add('day-mode');
     document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);
@@ -630,9 +1154,38 @@ function initApp() {
     document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
+    document.getElementById('searchHistorySection').classList.toggle('collapsed', settings.searchHistoryCollapsed);
     if(settings.trafficEnabled)toggleTraffic();
-    openMainMenu();
+
+    const savedRouteRaw = localStorage.getItem('naviLastRoute');
+    // Clear any incomplete offline downloads on startup
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data.action === 'cache-progress') {
+                 document.getElementById('offlineProgressBar').style.width = `${event.data.progress}%`;
+            }
+        });
+    }
+    if (savedRouteRaw) {
+        try {
+            const savedRoute = JSON.parse(savedRouteRaw);
+            if (confirm(`Znaleziono niezakończoną trasę do: ${savedRoute.destinationName}. Czy chcesz ją wznowić?`)) {
+                resumeLastRoute(savedRoute);
+            } else {
+                localStorage.removeItem('naviLastRoute');
+                openMainMenu();
+            }
+        } catch (e) {
+            localStorage.removeItem('naviLastRoute');
+            openMainMenu();
+        }
+    } else {
+        openMainMenu();
+    }
+
     loadFavorites();
+    loadSearchHistory();
+    loadUserIncidents();
     if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
     let wakeLock=null;async function requestWakeLock(){try{wakeLock=await navigator.wakeLock.request('screen')}catch(e){}}
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&appState.navigationActive)requestWakeLock()});

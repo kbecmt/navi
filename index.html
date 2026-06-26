@@ -52,6 +52,7 @@
     </div>
     <div class="sidebar-bottom-icons">
         <button class="sidebar-icon-btn" id="btnSound" onclick="toggleVoice()" title="Dźwięk">🔊</button>
+        <button class="sidebar-icon-btn" onclick="openReportPanel()" title="Zgłoś zdarzenie">⚠️</button>
         <button class="sidebar-icon-btn" onclick="openMainMenu()" title="Menu">☰</button>
     </div>
 </div>
@@ -83,6 +84,9 @@
         <button class="sb-close" onclick="stopNav()">✕</button>
     </div>
 </div>
+
+<!-- ===== CURRENT STREET DISPLAY ===== -->
+<div id="currentStreetDisplay"></div>
 
 <!-- ===== CAMERA ALERT ===== -->
 <div id="cameraAlert">
@@ -131,10 +135,20 @@
         </div>
         <div id="favoritesContainer"><div id="favoritesList"></div></div>
     </div>
+    <div class="mm-favorites" id="searchHistorySection">
+        <div class="mm-favorites-header" onclick="toggleSearchHistory()">
+            <h4>🕒 Ostatnie</h4>
+            <span class="fav-toggle-arrow">▼</span>
+        </div>
+        <div id="searchHistoryContainer"><div id="searchHistoryList"></div></div>
+    </div>
     <div class="mm-items">
         <div class="mm-item" onclick="startNav();closeMainMenu()"><span class="mm-icon">📍</span><span class="mm-label">Wyznacz trasę</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openSettingsSub()"><span class="mm-icon">⚙️</span><span class="mm-label">Ustawienia trasy</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openSpeedSettings()"><span class="mm-icon">🚨</span><span class="mm-label">Alerty prędkości</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openPoiSettings()"><span class="mm-icon">🚦</span><span class="mm-label">Filtruj POI</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openUserIncidentsPanel()"><span class="mm-icon">📢</span><span class="mm-label">Moje zgłoszenia</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openOfflineMaps()"><span class="mm-icon">📥</span><span class="mm-label">Mapy offline</span><span class="mm-arrow">›</span></div>
         <div class="mm-toggle-row">
             <span>🌙 Tryb nocny</span>
             <div class="mm-toggle" id="dayNightToggle" onclick="toggleDayNight()"></div>
@@ -168,9 +182,37 @@
 <div id="routeChoicePanel">
     <div class="rc-header">
         <h3>Wybierz trasę</h3>
+        <div id="rcWeather"></div>
         <button class="rc-close" onclick="cancelRouteChoice()">✕</button>
     </div>
     <div id="routeChoiceList"></div>
+    <div id="elevationChartContainer" style="display: none;"></div>
+</div>
+
+<!-- ===== REPORT PANEL ===== -->
+<div id="reportPanel">
+    <div class="rp-header">
+        <h3>Zgłoś zdarzenie</h3>
+        <button class="rp-close" onclick="closeReportPanel()">✕</button>
+    </div>
+    <div class="rp-grid">
+        <div class="rp-item" onclick="reportIncident('camera')">
+            <div class="rp-icon">📸</div>
+            <div class="rp-label">Fotoradar</div>
+        </div>
+        <div class="rp-item" onclick="reportIncident('accident')">
+            <div class="rp-icon">💥</div>
+            <div class="rp-label">Wypadek</div>
+        </div>
+        <div class="rp-item" onclick="reportIncident('traffic_jam')">
+            <div class="rp-icon">🚗</div>
+            <div class="rp-label">Korek</div>
+        </div>
+        <div class="rp-item" onclick="reportIncident('road_works')">
+            <div class="rp-icon">🚧</div>
+            <div class="rp-label">Roboty drogowe</div>
+        </div>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
