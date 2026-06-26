@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TomTom Lite Web Navigation</title>
     
-    <!-- Biblioteka Map Leaflet (CSS i JS) -->
-    <link rel="stylesheet" href="https://unpkg.com" />
-    <script src="https://unpkg.com"></script>
+    <!-- PRAWIDŁOWE LINKI DO LEAFLET (Zamiast samego unpkg.com) -->
+    <link rel="stylesheet" href="https://unpkg.com" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     
-    <!-- Wtyczka do rysowania tras (Leaflet Routing Machine) -->
+    <!-- PRAWIDŁOWY LINK DO WTYCZKI TRAS -->
+    <link rel="stylesheet" href="https://unpkg.com" />
     <script src="https://unpkg.com"></script>
 
     <style>
@@ -63,6 +64,7 @@
         }
     </style>
 </head>
+
 <body>
 
     <div class="search-panel">
