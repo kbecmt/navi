@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 </head>
-<body>
+<body onload="initApp()">
 
 <!-- ===== MAP ===== -->
 <div id="map"></div>
@@ -118,8 +118,14 @@
         <div class="mm-search-wrap">
             <span class="search-icon">🔍</span>
             <input id="dest" placeholder="Wpisz adres lub miasto…" autocomplete="off">
+            <div id="searchResults"></div>
         </div>
         <button class="search-go" onclick="startNav()">▶ Rozpocznij nawigację</button>
+        <button class="add-fav-btn" onclick="addFavorite()" title="Dodaj do ulubionych">⭐ Dodaj cel do ulubionych</button>
+    </div>
+    <div class="mm-favorites">
+        <h4>⭐ Ulubione</h4>
+        <div id="favoritesList"></div>
     </div>
     <div class="mm-items">
         <div class="mm-item" onclick="startNav();closeMainMenu()"><span class="mm-icon">📍</span><span class="mm-label">Wyznacz trasę</span><span class="mm-arrow">›</span></div>
@@ -136,6 +142,10 @@
         <div class="mm-toggle-row">
             <span>🗺️ Obrazy mapy</span>
             <div class="mm-toggle on" id="mapTilesToggle" onclick="toggleMapTiles()"></div>
+        </div>
+        <div class="mm-toggle-row">
+            <span>🚦 Natężenie ruchu</span>
+            <div class="mm-toggle" id="trafficToggle" onclick="toggleTraffic()"></div>
         </div>
     </div>
     <button class="mm-item" onclick="stopNav();closeMainMenu()" style="color:var(--danger)"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span></button>
