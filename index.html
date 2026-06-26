@@ -140,6 +140,17 @@ body,html{height:100%;overflow:hidden;background:var(--bg-map);font-family:-appl
 .sidebar-icon-btn:active{background:var(--accent);color:white}
 body.day-mode .sidebar-icon-btn{background:rgba(20,20,30,0.85);color:white}
 
+/* ===== PERSISTENT MENU BUTTON ===== */
+#persistentMenu{
+    position:absolute;top:50%;left:16px;transform:translateY(-50%);z-index:1080;
+    width:50px;height:50px;border-radius:50%;border:none;
+    background:rgba(255,255,255,0.9);color:#333;
+    font-size:24px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 3px 16px rgba(0,0,0,0.4);
+}
+#persistentMenu:active{transform:translateY(-50%) scale(0.9)}
+body.day-mode #persistentMenu{background:rgba(30,30,50,0.9);color:white}
+
 /* ===== BOTTOM SPEED BAR ===== */
 #speedBar{
     position:absolute;bottom:0;left:0;right:0;z-index:1100;
@@ -193,14 +204,14 @@ body.day-mode .sidebar-icon-btn{background:rgba(20,20,30,0.85);color:white}
 
 /* ===== CAMERA ALERT ===== */
 #cameraAlert{
-    position:absolute;top:140px;left:50%;transform:translateX(-50%) translateY(-60px);
+    position:absolute;top:140px;left:50%;transform:translateX(-50%);
     z-index:1200;background:var(--danger-bg);color:white;
     padding:10px 20px;border-radius:14px;font-weight:bold;font-size:14px;
-    display:flex;align-items:center;gap:10px;
+    display:none;align-items:center;gap:10px;
     box-shadow:0 4px 20px rgba(255,0,0,0.4);
-    transition:transform 0.3s cubic-bezier(.4,0,.2,1);pointer-events:none;
+    pointer-events:none;
 }
-#cameraAlert.show{transform:translateX(-50%) translateY(0)}
+#cameraAlert.show{display:flex}
 #cameraAlert .cam-icon{font-size:22px}
 #cameraAlert .cam-text .cam-dist{font-size:16px;font-weight:800}
 #cameraAlert .cam-text .cam-speed{font-size:11px;opacity:0.8}
@@ -377,7 +388,6 @@ body.day-mode .toggle.on{background:var(--accent)}
     <div id="nextTurnHint">
         <span class="nt-arrow" id="ntArrow">→</span>
         <span class="nt-dist" id="ntDist">—</span>
-        <span class="nt-sep">·</span>
         <span id="ntText">—</span>
     </div>
 </div>
@@ -446,6 +456,9 @@ body.day-mode .toggle.on{background:var(--accent)}
 <!-- ===== VOICE TOAST ===== -->
 <div id="voiceToast">—</div>
 
+<!-- ===== PERSISTENT MENU BUTTON ===== -->
+<button id="persistentMenu" onclick="openMainMenu()" title="Menu">☰</button>
+
 <!-- ===== OVERLAY ===== -->
 <div id="overlay" onclick="closeMainMenu();closeSettingsSub()"></div>
 
@@ -473,6 +486,10 @@ body.day-mode .toggle.on{background:var(--accent)}
         <div class="mm-toggle-row">
             <span>🔊 Powiadomienia głosowe</span>
             <div class="mm-toggle on" id="voiceToggle" onclick="toggleVoice()"></div>
+        </div>
+        <div class="mm-toggle-row">
+            <span>🗺️ Obrazy mapy</span>
+            <div class="mm-toggle on" id="mapTilesToggle" onclick="toggleMapTiles()"></div>
         </div>
     </div>
     <button class="mm-item" onclick="stopNav();closeMainMenu()" style="color:var(--danger)"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span></button>
@@ -514,13 +531,36 @@ let speedAlertEnabled=true;
 let voiceEnabled=true;
 let isNightMode=true;
 let roadEventsLoaded=false; // loaded only once at route start
+let mapTilesEnabled=true;
+let avoidTolls=false,avoidFerries=false,avoidHighways=false,avoidUnpaved=false;
+
+// ===== LOCAL STORAGE =====
+function saveSettings(){
+    const s={routeType,speedAlertOver,speedAlertEnabled,voiceEnabled,isNightMode,mapTilesEnabled,avoidTolls,avoidFerries,avoidHighways,avoidUnpaved};
+    try{localStorage.setItem('naviSettings',JSON.stringify(s))}catch(e){}
+}
+function loadSettings(){
+    try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){
+        if(s.routeType)routeType=s.routeType;
+        if(s.speedAlertOver!==undefined)speedAlertOver=s.speedAlertOver;
+        if(s.speedAlertEnabled!==undefined)speedAlertEnabled=s.speedAlertEnabled;
+        if(s.voiceEnabled!==undefined)voiceEnabled=s.voiceEnabled;
+        if(s.isNightMode!==undefined)isNightMode=s.isNightMode;
+        if(s.mapTilesEnabled!==undefined)mapTilesEnabled=s.mapTilesEnabled;
+        if(s.avoidTolls!==undefined)avoidTolls=s.avoidTolls;
+        if(s.avoidFerries!==undefined)avoidFerries=s.avoidFerries;
+        if(s.avoidHighways!==undefined)avoidHighways=s.avoidHighways;
+        if(s.avoidUnpaved!==undefined)avoidUnpaved=s.avoidUnpaved;
+    }}catch(e){}
+}
+loadSettings();
 
 // ===== PANELS =====
-function openMainMenu(){document.getElementById('mainMenu').classList.add('open');document.getElementById('overlay').classList.add('show')}
-function closeMainMenu(){document.getElementById('mainMenu').classList.remove('open');document.getElementById('overlay').classList.remove('show')}
+function openMainMenu(){document.getElementById('mainMenu').classList.add('open');document.getElementById('overlay').classList.add('show');document.getElementById('persistentMenu').style.display='none'}
+function closeMainMenu(){document.getElementById('mainMenu').classList.remove('open');document.getElementById('overlay').classList.remove('show');if(!navigationActive)document.getElementById('persistentMenu').style.display='flex'}
 
 function openSettingsSub(){
-    closeMainMenu();
+    document.getElementById('mainMenu').classList.remove('open');
     document.getElementById('ssTitle').textContent='Ustawienia trasy';
     document.getElementById('ssBody').innerHTML=`
         <div class="ss-section">
@@ -533,17 +573,17 @@ function openSettingsSub(){
         </div>
         <div class="ss-section">
             <h4>Unikaj</h4>
-            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">💰</span> Opłaty</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛤️</span> Drogi nieutwardzone</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛣️</span> Autostrady</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">⛴️</span> Promy</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">💰</span> Opłaty</div><div class="toggle ${avoidTolls?'on':''}" onclick="avoidTolls=!avoidTolls;this.classList.toggle('on');saveSettings()"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛤️</span> Drogi nieutwardzone</div><div class="toggle ${avoidUnpaved?'on':''}" onclick="avoidUnpaved=!avoidUnpaved;this.classList.toggle('on');saveSettings()"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛣️</span> Autostrady</div><div class="toggle ${avoidHighways?'on':''}" onclick="avoidHighways=!avoidHighways;this.classList.toggle('on');saveSettings()"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">⛴️</span> Promy</div><div class="toggle ${avoidFerries?'on':''}" onclick="avoidFerries=!avoidFerries;this.classList.toggle('on');saveSettings()"></div></div>
         </div>
     `;
     document.getElementById('settingsSub').classList.add('open');
 }
 
 function openSpeedSettings(){
-    closeMainMenu();
+    document.getElementById('mainMenu').classList.remove('open');
     document.getElementById('ssTitle').textContent='Alerty prędkości';
     document.getElementById('ssBody').innerHTML=`
         <div class="ss-section">
@@ -574,21 +614,22 @@ function openSpeedSettings(){
     document.getElementById('settingsSub').classList.add('open');
 }
 
-function closeSettingsSub(){document.getElementById('settingsSub').classList.remove('open')}
+function closeSettingsSub(){document.getElementById('settingsSub').classList.remove('open');document.getElementById('mainMenu').classList.add('open');document.getElementById('overlay').classList.add('show')}
 
 function setRouteType(el,type){
     document.querySelectorAll('.route-type').forEach(e=>e.classList.remove('active'));
     el.classList.add('active');
     routeType=type;
+    saveSettings();
 }
 
 // ===== VOICE =====
 function toggleVoice(){
     voiceEnabled=!voiceEnabled;
-    const b=document.getElementById('voiceToggle');
-    if(b) b.classList.toggle('on',voiceEnabled);
+    document.getElementById('voiceToggle').classList.toggle('on',voiceEnabled);
     const sb=document.getElementById('btnSound');
     if(sb) sb.textContent=voiceEnabled?'🔊':'🔇';
+    saveSettings();
 }
 function speak(text){
     if(!voiceEnabled||!text)return;
@@ -600,18 +641,47 @@ function speak(text){
     u.onend=u.onerror=()=>t.classList.remove('show');
     window.speechSynthesis.speak(u);
 }
+// Unlock speech synthesis on mobile browsers (required by iOS/Android)
+let speechUnlocked=false;
+function unlockSpeech(){
+    if(speechUnlocked)return;
+    speechUnlocked=true;
+    try{
+        const u=new SpeechSynthesisUtterance('');
+        u.volume=0;u.rate=0.01;
+        window.speechSynthesis.speak(u);
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.resume();
+    }catch(e){}
+}
+document.addEventListener('touchstart',unlockSpeech,{once:true});
+document.addEventListener('click',unlockSpeech,{once:true});
+// Periodically resume speech to prevent mobile browsers from suspending it
+setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},3000);
 
+function toggleMapTiles(){
+    mapTilesEnabled=!mapTilesEnabled;
+    document.getElementById('mapTilesToggle').classList.toggle('on',mapTilesEnabled);
+    if(mapTilesEnabled){loadMapTiles()}
+    else{
+        if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}
+        document.getElementById('map').style.background=isNightMode?'#111118':'#d8d8e0';
+    }
+    saveSettings();
+}
 // ===== DAY / NIGHT =====
 function toggleDayNight(){
     isNightMode=!isNightMode;
     document.body.classList.toggle('day-mode',!isNightMode);
     document.getElementById('dayNightToggle').classList.toggle('on',isNightMode);
-    // Update map tiles
     if(mapTilesLayer)map.removeLayer(mapTilesLayer);
     loadMapTiles();
+    if(!mapTilesEnabled)document.getElementById('map').style.background=isNightMode?'#111118':'#d8d8e0';
+    saveSettings();
 }
 let mapTilesLayer=null;
 function loadMapTiles(){
+    if(!mapTilesEnabled)return;
     if(isNightMode){
         mapTilesLayer=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap',maxZoom:19}).addTo(map);
     } else {
@@ -650,7 +720,15 @@ function fmtDuration(min){const h=Math.floor(min/60);const m=Math.round(min%60);
 function bearingName(b){const n=['na północ','na północny wschód','na wschód','na południowy wschód','na południe','na południowy zachód','na zachód','na północny zachód'];return n[Math.round(b/45)%8]}
 const arrowChars=['⬆','↗','➡','↘','⬇','↙','⬅','↖'];
 function bearingToArrow(b){return arrowChars[Math.round(b/45)%8]}
-function rotateMap(deg){document.getElementById('map').style.transform=`rotate(${-deg}deg)`}
+let displayedBearing=0;
+function rotateMap(deg){
+    // Smooth interpolation toward target bearing
+    let diff=deg-displayedBearing;
+    if(diff>180)diff-=360;if(diff<-180)diff+=360;
+    displayedBearing+=diff*0.25;
+    if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;
+    document.getElementById('map').style.transform=`rotate(${-displayedBearing}deg)`;
+}
 
 // ===== SPEED CAMERAS =====
 const speedCameras=[
@@ -929,9 +1007,18 @@ function startNav(){
 // ===== ROUTE =====
 function drawRoute(){
     if(routeControl)map.removeControl(routeControl);
+    const exclude=[];
+    if(avoidTolls)exclude.push('toll');
+    if(avoidFerries)exclude.push('ferry');
+    if(avoidHighways)exclude.push('motorway');
+    const routerOpts={serviceUrl:"https://router.project-osrm.org/route/v1"};
+    if(routeType==='fast')routerOpts.profile='driving';
+    else if(routeType==='short')routerOpts.profile='driving';
+    else if(routeType==='eco')routerOpts.profile='driving';
+    if(exclude.length)routerOpts.exclude=exclude;
     routeControl=L.Routing.control({
         waypoints:[userPos,destination],
-        router:L.Routing.osrmv1({serviceUrl:"https://router.project-osrm.org/route/v1"}),
+        router:L.Routing.osrmv1(routerOpts),
         addWaypoints:false,draggableWaypoints:false,fitSelectedRoutes:false,show:false,
         lineOptions:{styles:[{color:"#2979ff",weight:6,opacity:0.85}]},
         createMarker:()=>null
@@ -998,11 +1085,16 @@ function stopNav(){
     document.getElementById('sbProgress').style.height='0%';
     if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();
     document.getElementById('voiceToast').classList.remove('show');
+    document.getElementById('persistentMenu').style.display='flex';
     speak("Nawigacja zatrzymana");
 }
 
 // ===== INIT =====
-document.getElementById('dayNightToggle').classList.add('on');
+// Apply loaded settings to UI
+if(isNightMode){document.body.classList.remove('day-mode')}else{document.body.classList.add('day-mode')}
+document.getElementById('dayNightToggle').classList.toggle('on',isNightMode);
+document.getElementById('voiceToggle').classList.toggle('on',voiceEnabled);
+document.getElementById('mapTilesToggle').classList.toggle('on',mapTilesEnabled);
 openMainMenu();
 </script>
 </body>
