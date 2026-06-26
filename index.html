@@ -74,7 +74,8 @@
         </div>
         <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:14px;opacity:0.6">⏱</span>
-            <b id="statDur" style="font-size:15px">—</b>
+            <b id="statDur" style="font-size:15px; min-width: 65px;">—</b>
+            <b id="statArrival" style="font-size:15px; opacity: 0.7;">—:—</b>
         </div>
         <div id="statTraffic" style="display:none;color:#ff5252;font-weight:700;font-size:13px">
             🚗 <span id="statTrafficVal">—</span>
@@ -151,7 +152,7 @@
             <div class="mm-toggle" id="trafficToggle" onclick="toggleTraffic()"></div>
         </div>
     </div>
-    <button class="mm-item" onclick="stopNav();closeMainMenu()" style="color:var(--danger)"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span></button>
+    <div class="mm-item mm-item-danger" onclick="stopNav();closeMainMenu()"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span><span class="mm-arrow">›</span></div>
 </div>
 
 <!-- ===== SETTINGS SUB-PANEL ===== -->
@@ -161,6 +162,15 @@
         <h2 id="ssTitle">Ustawienia</h2>
     </div>
     <div class="ss-body" id="ssBody"></div>
+</div>
+
+<!-- ===== ROUTE CHOICE PANEL ===== -->
+<div id="routeChoicePanel">
+    <div class="rc-header">
+        <h3>Wybierz trasę</h3>
+        <button class="rc-close" onclick="cancelRouteChoice()">✕</button>
+    </div>
+    <div id="routeChoiceList"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

@@ -194,6 +194,17 @@ body.day-mode #map { background: #d8d8e0; }
     text-shadow: 0 1px 3px rgba(0,0,0,0.7);
     z-index: 1;
 }
+.sidebar-strip-marker .icon-dot.turn {
+    background-color: rgba(41, 121, 255, 0.9);
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
 .sidebar-bottom-icons {
     display: flex;
     flex-direction: column;
@@ -588,6 +599,9 @@ body.day-mode .mm-favorites {
 }
 body.day-mode .mm-item, body.day-mode .mm-toggle-row { border-color: var(--border); }
 .mm-item:last-child { border-bottom: none; }
+.mm-item.mm-item-danger {
+    color: var(--danger);
+}
 .mm-icon { margin-right: 15px; }
 .mm-label { flex-grow: 1; }
 .mm-arrow { opacity: 0.5; }
@@ -661,3 +675,72 @@ body.day-mode .avoid-item { border-color: var(--border); }
 }
 .ss-val { display: flex; align-items: center; gap: 10px; }
 #speedAlertVal { min-width: 70px; text-align: right; }
+
+/* ===== ROUTE CHOICE PANEL ===== */
+#routeChoicePanel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--card-dark);
+    z-index: 1003;
+    border-radius: 20px 20px 0 0;
+    padding: 15px 15px calc(15px + env(safe-area-inset-bottom));
+    transform: translateY(100%);
+    transition: transform 0.3s ease-out;
+    box-shadow: var(--shadow-lg);
+    display: none;
+}
+#routeChoicePanel.show {
+    display: block;
+    transform: translateY(0);
+}
+body.day-mode #routeChoicePanel {
+    background: var(--card);
+}
+.rc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+.rc-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+.rc-close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+}
+#routeChoiceList {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.rc-card {
+    padding: 15px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.rc-card.active {
+    border-color: var(--primary);
+    background: rgba(41, 121, 255, 0.1);
+}
+.rc-duration {
+    font-size: 18px;
+    font-weight: 700;
+}
+.rc-distance {
+    font-size: 16px;
+    opacity: 0.8;
+}
