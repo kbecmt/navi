@@ -96,29 +96,39 @@
 
         // 2. Pobieranie pozycji GPS użytkownika na żywo
         if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(
-                (position) => {
-                    const lat = position.coords.latitude;
-                    const lng = position.coords.longitude;
-                    userLocation = L.latLng(lat, lng);
+    navigator.geolocation.watchPosition(
+        (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            userLocation = L.latLng(lat, lng);
 
-                    if (!userMarker) {
-                        // Niebieski punkt lokalizacji (Styl TomTom)
-                        userMarker = L.circleMarker(userLocation, {
-                            radius: 9, color: '#fff', weight: 3, fillOpacity: 1, fillColor: '#007BFF'
-                        }).addTo(map);
-                        map.setView(userLocation, 15);
-                        pobierzFotoradary(lat, lng); // Pobierz fotoradary wokół nowej pozycji
-                    } else {
-                        userMarker.setLatLng(userLocation);
-                    }
-                    
-                    sprawdzDystansDoRadarow(userLocation);
-                },
-                (error) => { alert("Błąd GPS lub brak uprawnień w przeglądarce."); },
-                { enableHighAccuracy: true }
-            );
+            if (!userMarker) {
+                userMarker = L.circleMarker(userLocation, {
+                    radius: 9, color: '#fff', weight: 3, fillOpacity: 1, fillColor: '#007BFF'
+                }).addTo(map);
+                map.setView(userLocation, 15);
+                pobierzFotoradary(lat, lng);
+            } else {
+                userMarker.setLatLng(userLocation);
+            }
+            sprawdzDystansDoRadarow(userLocation);
+        },
+        (error) => { 
+            // Obsługa błędów w celu łatwiejszej diagnostyki
+            console.error("Kod błędu GPS: " + error.code);
+            if(error.code == 1) alert("Brak zgody na GPS. Sprawdź ustawienia prywatności strony.");
+            if(error.code == 2) alert("Nie można ustalić pozycji. Wyjdź na zewnątrz budynku.");
+            if(error.code == 3) alert("Upłynął limit czasu żądania GPS.");
+        },
+        { 
+            enableHighAccuracy: true, // Próba użycia dokładnego GPS
+            timeout: 10000,          // Czas oczekiwania na sygnał (10 sekund)
+            maximumAge: 0            // Wymuszenie pobierania świeżej pozycji (nie z pamięci podręcznej)
         }
+    );
+} else {
+    alert("Twoja przeglądarka w ogóle nie obsługuje geolokalizacji.");
+}
 
         // 3. Geokodowanie i Wyznaczanie Trasy (Kliknięcie "Jedź")
         async function szukajIJedz() {
