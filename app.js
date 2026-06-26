@@ -38,7 +38,7 @@ const appState = {
     lastSpeedWarnSpoken: 0,
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -172,42 +172,88 @@ let speedCameras=[];
 let routeCameras=[];
 function distToRoute(lat,lng){if(!appState.routeCoords.length)return Infinity;let minD=Infinity;for(let i=0;i<appState.routeCoords.length-1;i+=3){const d=haversine(lat,lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);if(d<minD)minD=d;if(minD<0.1)return minD}return minD}
 function snapToRoute(lat,lng){if(!appState.routeCoords.length)return{lat,lng};let minD=Infinity,snap=appState.routeCoords[0];for(let i=0;i<appState.routeCoords.length-1;i++){const p=appState.routeCoords[i],q=appState.routeCoords[i+1];const dx=q.lng-p.lng,dy=q.lat-p.lat;const len2=dx*dx+dy*dy;if(len2===0){const d=haversine(lat,lng,p.lat,p.lng);if(d<minD){minD=d;snap=p}continue}let t=((lng-p.lng)*dx+(lat-p.lat)*dy)/len2;t=Math.max(0,Math.min(1,t));const snapLat=p.lat+t*dy,snapLng=p.lng+t*dx;const d=haversine(lat,lng,snapLat,snapLng);if(d<minD){minD=d;snap={lat:snapLat,lng:snapLng}}}return snap}
-function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.5;routeCameras=(window.speedCameras||[]).filter(cam=>cam.lat>=minLat-margin&&cam.lat<=maxLat+margin&&cam.lng>=minLng-margin&&cam.lng<=maxLng+margin&&distToRoute(cam.lat,cam.lng)<5);loadOSMPOIs(minLat,maxLat,minLng,maxLng)}
-const osmTypeMap={amenity_fuel:{icon:'⛽',type:'fuel'},amenity_parking:{icon:'🅿️',type:'parking'},amenity_restaurant:{icon:'🍽️',type:'fuel'},amenity_cafe:{icon:'☕',type:'fuel'},amenity_hospital:{icon:'🏥',type:'danger'},amenity_pharmacy:{icon:'💊',type:'fuel'},amenity_fuel_station:{icon:'⛽',type:'fuel'},shop_fuel:{icon:'⛽',type:'fuel'},highway_traffic_signals:{icon:'🚦',type:'traffic'},highway_motorway_junction:{icon:'🛣️',type:'traffic'},man_made_works:{icon:'⚠️',type:'danger'},emergency_access_point:{icon:'🚨',type:'danger'},barrier_toll_booth:{icon:'💰',type:'danger'}};
+function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.05;routeCameras=(window.speedCameras||[]).filter(cam=>cam.lat>=minLat-margin&&cam.lat<=maxLat+margin&&cam.lng>=minLng-margin&&cam.lng<=maxLng+margin&&distToRoute(cam.lat,cam.lng)<0.5);loadOSMPOIs(minLat,maxLat,minLng,maxLng)}
+const osmTypeMap={
+    amenity_fuel:{icon:'⛽',type:'fuel'},
+    amenity_parking:{icon:'🅿️',type:'parking'},
+    amenity_restaurant:{icon:'🍽️',type:'restaurant'},
+    amenity_cafe:{icon:'☕',type:'cafe'},
+    amenity_hospital:{icon:'🏥',type:'danger'},
+    amenity_pharmacy:{icon:'💊',type:'pharmacy'},
+    highway_speed_camera:{icon:'📸',type:'camera', isSpeedCamera: true},
+    highway_construction:{icon:'🚧',type:'danger'},
+    highway_traffic_signals:{icon:'🚦',type:'traffic'},
+    barrier_toll_booth:{icon:'💰',type:'danger'}
+};
 let fallbackPOIs = [];
 function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
-    appState.routePOIs=(window.fallbackPOIs||[]).filter(p=>distToRoute(p.lat,p.lng)<5);
+    // Start with fallback POIs filtered by route proximity
+    const poisOnRoute = (window.fallbackPOIs || []).filter(p => distToRoute(p.lat, p.lng) < 0.5);
+    appState.routePOIs = [...poisOnRoute];
     renderPOIMarkers();
-    const bbox=(minLat-0.5)+','+(minLng-0.5)+','+(maxLat+0.5)+','+(maxLng+0.5);
-    const query='[out:json][timeout:10];(node["amenity"="fuel"]('+bbox+');node["amenity"="parking"]('+bbox+');node["amenity"="restaurant"]('+bbox+');node["amenity"="cafe"]('+bbox+');node["amenity"="hospital"]('+bbox+');node["amenity"="pharmacy"]('+bbox+');node["shop"="fuel"]('+bbox+');node["highway"="traffic_signals"]('+bbox+');node["highway"="motorway_junction"]('+bbox+');node["barrier"="toll_booth"]('+bbox+'););out body 200;';
-    fetch(CONFIG.overpassUrl,{method:'POST',body:'data='+encodeURIComponent(query)})
-    .then(r=>r.json()).then(data=>{
-        if(!data.elements)return;
-        const osmPOIs=[];
-        for(const el of data.elements){
-            if(el.type!=='node')continue;
-            const tags=el.tags||{};let osmType=null,name=tags.name||'';
-            for(const key in osmTypeMap){const[kv,v]=key.split('_');if(tags[kv]===v){osmType=osmTypeMap[key];break}}
-            if(!osmType){
-                if(tags.amenity==='fuel'||tags.shop==='fuel')osmType={icon:'⛽',type:'fuel'};
-                else if(tags.amenity==='parking')osmType={icon:'🅿️',type:'parking'};
-                else if(tags.amenity==='restaurant'||tags.amenity==='cafe')osmType={icon:'🍽️',type:'fuel'};
-                else if(tags.amenity==='hospital')osmType={icon:'🏥',type:'danger'};
-                else if(tags.amenity==='pharmacy')osmType={icon:'💊',type:'fuel'};
-                else if(tags.highway==='traffic_signals')osmType={icon:'🚦',type:'traffic'};
-                else if(tags.highway==='motorway_junction')osmType={icon:'🛣️',type:'traffic'};
-                else if(tags.barrier==='toll_booth')osmType={icon:'💰',type:'danger'};
-                else if(tags.emergency)osmType={icon:'🚨',type:'danger'};
-                else continue;
+
+    const bbox = `(${minLat-0.05},${minLng-0.05},${maxLat+0.05},${maxLng+0.05})`;
+    const poiTags = Object.keys(osmTypeMap).map(tag => `node["${tag.replace('_', '"="')}"]${bbox};`);
+    const query = `[out:json][timeout:25];(${poiTags.join('')});out body;`;
+
+    fetch(CONFIG.overpassUrl, { method: 'POST', body: 'data=' + encodeURIComponent(query) })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.elements) return;
+        const osmPOIs = data.elements.map(el => {
+            if (el.type !== 'node') return null;
+            const tags = el.tags || {};
+            let poiType = null;
+            for (const key in osmTypeMap) {
+                const [tagKey, tagValue] = key.split('_');
+                if (tags[tagKey] === tagValue) {
+                    poiType = osmTypeMap[key];
+                    break;
+                }
             }
-            if(!name)name=tags.brand||tags.operator||osmType.icon+' OSM';
-            const lat=el.lat,lng=el.lon;
-            if(distToRoute(lat,lng)<2)osmPOIs.push({lat,lng,type:osmType.type,icon:osmType.icon,name});
+            if (!poiType) return null;
+            const name = tags.name || tags.brand || tags.operator || poiType.icon + ' OSM';
+            if (distToRoute(el.lat, el.lon) < 0.5) {
+                const poi = { lat: el.lat, lng: el.lon, type: poiType.type, icon: poiType.icon, name };
+                if (poiType.isSpeedCamera) {
+                    poi.limit = parseInt(tags.maxspeed, 10) || 0;
+                }
+                return poi;
+            }
+            return null;
+        }).filter(Boolean); // Remove null entries
+
+        if (osmPOIs.length > 0) {
+            // Combine fallback POIs with new ones from Overpass, avoiding duplicates
+            const existingPoiCoords = new Set(appState.routePOIs.map(p => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`));
+            const newPois = osmPOIs.filter(p => !existingPoiCoords.has(`${p.lat.toFixed(4)},${p.lng.toFixed(4)}`));
+            appState.routePOIs.push(...newPois);
+            renderPOIMarkers();
         }
-        if(osmPOIs.length>0){appState.routePOIs=osmPOIs;renderPOIMarkers()}
-    }).catch(()=>{});
+    })
+    .catch(err => console.error("Failed to load POIs from Overpass API:", err));
 }
-function renderPOIMarkers(){appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];for(const poi of appState.routePOIs){const snapped=snapToRoute(poi.lat,poi.lng);const icon=L.divIcon({className:'',html:'<div style="font-size:22px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">'+poi.icon+'</div>',iconSize:[24,24],iconAnchor:[12,12]});const m=L.marker([snapped.lat,snapped.lng],{icon}).addTo(map);m.bindTooltip(poi.name,{permanent:false,direction:'top',offset:[0,-8]});appState.poiMarkers.push(m)}for(const cam of routeCameras){const snapped=snapToRoute(cam.lat,cam.lng);const icon=L.divIcon({className:'',html:'<div style="font-size:18px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">📸</div>',iconSize:[20,20],iconAnchor:[10,10]});const m=L.marker([snapped.lat,snapped.lng],{icon}).addTo(map);m.bindTooltip(cam.name+' ('+cam.limit+' km/h)',{permanent:false,direction:'top',offset:[0,-8]});appState.poiMarkers.push(m)}}
+function renderPOIMarkers(){
+    appState.poiMarkers.forEach(m=>map.removeLayer(m));
+    appState.poiMarkers=[];
+    const renderedCoords = new Set();
+
+    const allPois = [...appState.routePOIs, ...routeCameras];
+
+    for(const poi of allPois){
+        const coordKey = `${poi.lat.toFixed(4)},${poi.lng.toFixed(4)}`;
+        if (renderedCoords.has(coordKey)) continue;
+
+        const snapped=snapToRoute(poi.lat,poi.lng);
+        const iconHtml = `<div style="font-size:22px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">${poi.icon || '📸'}</div>`;
+        const icon=L.divIcon({className:'',html:iconHtml,iconSize:[24,24],iconAnchor:[12,12]});
+        const m=L.marker([snapped.lat,snapped.lng],{icon}).addTo(map);
+        const tooltipText = poi.limit ? `${poi.name} (${poi.limit} km/h)` : poi.name;
+        m.bindTooltip(tooltipText,{permanent:false,direction:'top',offset:[0,-8]});
+        appState.poiMarkers.push(m);
+        renderedCoords.add(coordKey);
+    }
+}
 function checkSpeedCameras(lat,lng,speed){let minDist=Infinity,nearestCam=null;for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(d<minDist){minDist=d;nearestCam=cam}}const alert=document.getElementById('cameraAlert'),scRing=document.getElementById('scRing'),scLimit=document.getElementById('scLimit');appState.nearestCameraDistance=minDist;if(nearestCam&&minDist<CONFIG.cameraShowRange){appState.currentSpeedLimit=nearestCam.limit;document.getElementById('camDistText').textContent=fmtDist(minDist);document.getElementById('camSpeedText').textContent='Ograniczenie: '+nearestCam.limit+' km/h — '+nearestCam.name;scLimit.textContent=nearestCam.limit;scLimit.style.display='flex';if(minDist<=CONFIG.cameraAlertRange&&minDist>CONFIG.cameraNearRange){alert.classList.add('show');const camKey=nearestCam.name+Math.round(minDist*10);if(camKey!==appState.lastCameraSpoken){appState.lastCameraSpoken=camKey;speak('Uwaga, fotoradar, '+nearestCam.limit+' km/h, za '+fmtDist(minDist))}}else alert.classList.remove('show');if(settings.speedAlertEnabled&&speed>nearestCam.limit+settings.speedAlertOver){const now=Date.now();if(now-appState.lastSpeedWarnSpoken>CONFIG.speedWarnCooldown){appState.lastSpeedWarnSpoken=now;speak('Uwaga! Przekroczono prędkość o '+Math.round(speed-nearestCam.limit)+' kilometrów na godzinę!');document.getElementById('speedWarning').classList.add('show');setTimeout(()=>document.getElementById('speedWarning').classList.remove('show'),3000)}}}else{alert.classList.remove('show');appState.currentSpeedLimit=0;scLimit.textContent='—'}if(appState.currentSpeedLimit>0){if(speed>appState.currentSpeedLimit+settings.speedAlertOver)scRing.className='sc-ring over';else if(speed>appState.currentSpeedLimit)scRing.className='sc-ring warn';else scRing.className='sc-ring'}else scRing.className='sc-ring'}
 function updateRouteStrip(lat,lng){if(!appState.routeCoords.length||!appState.navigationActive)return;const track=document.getElementById('sbTrack'),progress=document.getElementById('sbProgress');let totalDist=0;const cumDists=[0];for(let i=1;i<appState.routeCoords.length;i++){totalDist+=haversine(appState.routeCoords[i-1].lat,appState.routeCoords[i-1].lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);cumDists.push(totalDist)}if(totalDist===0)return;let minD=Infinity,closestIdx=0;for(let i=0;i<appState.routeCoords.length;i++){const d=haversine(lat,lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);if(d<minD){minD=d;closestIdx=i}}const doneDist=cumDists[closestIdx];progress.style.height=Math.min(100,(doneDist/totalDist)*100)+'%';track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());const lookAhead=5;for(const inst of appState.routeInstructions){if(inst.index<closestIdx)continue;const instDist=haversine(lat,lng,inst.lat,inst.lng);if(instDist>lookAhead)continue;const topPx=(instDist/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot turn">'+bearingToArrow(inst.bearing||0)+'</div>';track.appendChild(m)}for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(d>lookAhead)continue;const topPx=(d/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot camera">📸</div>';track.appendChild(m)}for(const poi of appState.routePOIs){const d=haversine(lat,lng,poi.lat,poi.lng);if(d>lookAhead)continue;const topPx=(d/lookAhead)*track.clientHeight;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=topPx+'px';m.innerHTML='<div class="icon-dot '+poi.type+'">'+poi.icon+'</div>';track.appendChild(m)}const um=document.createElement('div');um.className='sidebar-strip-marker';um.style.top=Math.min(100,(doneDist/totalDist)*100)+'%';um.innerHTML='<div class="icon-dot user">⬆</div>';track.appendChild(um)}
 function debouncedSetView(pos){const now=Date.now();if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;appState.lastMapViewTime=now;appState.lastMapViewPos=pos;map.setView(pos,CONFIG.defaultZoom)}
@@ -365,6 +411,12 @@ function renderFavorites() {
     });
 }
 
+function toggleFavorites() {
+    settings.favoritesCollapsed = !settings.favoritesCollapsed;
+    document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
+    saveSettings();
+}
+
 function debounce(func, delay) {
     let timeout;
     return function(...args) {
@@ -430,6 +482,7 @@ function initApp() {
     document.getElementById('voiceToggle').classList.toggle('on',settings.voiceEnabled);
     document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
+    document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
     if(settings.trafficEnabled)toggleTraffic();
     openMainMenu();
     loadFavorites();

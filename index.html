@@ -124,8 +124,11 @@
         <button class="add-fav-btn" onclick="addFavorite()" title="Dodaj do ulubionych">⭐ Dodaj cel do ulubionych</button>
     </div>
     <div class="mm-favorites">
-        <h4>⭐ Ulubione</h4>
-        <div id="favoritesList"></div>
+        <div class="mm-favorites-header" onclick="toggleFavorites()">
+            <h4>⭐ Ulubione</h4>
+            <span class="fav-toggle-arrow">▼</span>
+        </div>
+        <div id="favoritesContainer"><div id="favoritesList"></div></div>
     </div>
     <div class="mm-items">
         <div class="mm-item" onclick="startNav();closeMainMenu()"><span class="mm-icon">📍</span><span class="mm-label">Wyznacz trasę</span><span class="mm-arrow">›</span></div>
