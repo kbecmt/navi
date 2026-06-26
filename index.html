@@ -1,178 +1,176 @@
 <!DOCTYPE html>
 <html lang="pl">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Nawigacja Samochodowa</title>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nawigacja GPS</title>
 
-        <!-- Style dla mapy Leaflet -->
-        <link rel="stylesheet"
-            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <!-- Style dla wtyczki wyznaczania tras -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 
-        <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        body, html {
-            height: 100%;
-            overflow: hidden;
-        }
-        #map {
-            height: 100vh;
-            width: 100vw;
-            z-index: 1;
-        }
-        /* Panel sterowania nawigacją */
-        #nav-panel {
-            position: absolute;
-            top: 15px;
-            left: 15px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            width: 320px;
-        }
-        h3 {
-            margin-bottom: 10px;
-            color: #333;
-            font-size: 16px;
-        }
-        input {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 10px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        /* Ukrycie tekstowych wskazówek krok po kroku, aby nie zasłaniały mapy mobilnie */
-        .leaflet-routing-container {
-            max-height: 200px;
-            overflow-y: auto;
-            background: white !important;
-            opacity: 0.95;
-        }
-    </style>
-    </head>
-    <body>
+<style>
+body,html{
+    margin:0;
+    padding:0;
+    height:100%;
+    overflow:hidden;
+    background:#0f1117;
+    font-family:Arial;
+}
 
-        <div id="nav-panel">
-            <h3>Nawigacja GPS</h3>
-            <input type="text" id="destination"
-                placeholder="Wpisz cel (np. Warszawa, Al. Jerozolimskie)">
-            <button onclick="startNavigation()">Wyznacz trasę</button>
-        </div>
+#map{
+    width:100%;
+    height:100%;
+}
 
-        <div id="map"></div>
+#panel{
+    position:absolute;
+    top:15px;
+    left:15px;
+    z-index:999;
+    background:#1c1f2a;
+    padding:12px;
+    border-radius:10px;
+    width:260px;
+    color:white;
+}
 
-        <!-- Skrypty Leaflet i Leaflet Routing Machine -->
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+input{
+    width:100%;
+    padding:10px;
+    margin-top:5px;
+    border:none;
+    border-radius:6px;
+    background:#111522;
+    color:white;
+}
 
-        <script>
-        let map;
-        let userLocation = null;
-        let routingControl = null;
+button{
+    width:100%;
+    margin-top:8px;
+    padding:10px;
+    border:none;
+    border-radius:6px;
+    background:#00a2ff;
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+}
 
-        // 1. Inicjalizacja mapy ze środkiem w Polsce
-        map = L.map('map').setView([52.069, 19.480], 6);
+button.stop{
+    background:#ff3b3b;
+}
+</style>
+</head>
 
-        // 2. Dodanie warstwy graficznej OpenStreetMap
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+<body>
+
+<div id="panel">
+    <h3>Nawigacja</h3>
+    <input id="dest" placeholder="Wpisz cel">
+    <button onclick="startNav()">Start</button>
+    <button class="stop" onclick="stopNav()">Stop</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
+<script>
+let map = L.map('map').setView([50.06, 19.94], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: 'OSM'
+}).addTo(map);
+
+let userPos = null;
+let destination = null;
+let routeControl = null;
+let userMarker = null;
+
+// ===== GPS =====
+navigator.geolocation.watchPosition(pos => {
+
+    userPos = L.latLng(pos.coords.latitude, pos.coords.longitude);
+
+    if (!userMarker) {
+        userMarker = L.circleMarker(userPos, {
+            radius: 8,
+            color: "#00a2ff",
+            fillColor: "#00a2ff",
+            fillOpacity: 1
         }).addTo(map);
+    } else {
+        userMarker.setLatLng(userPos);
+    }
 
-        // 3. Automatyczne pobieranie pozycji GPS użytkownika
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    userLocation = [position.coords.latitude, position.coords.longitude];
-                    map.setView(userLocation, 14);
-                    
-                    // Dodanie ikony w miejscu kierowcy
-                    L.marker(userLocation).addTo(map)
-                        .bindPopup('Twoja pozycja')
-                        .openPopup();
-                },
-                () => {
-                    alert("Nie udało się pobrać Twojej lokalizacji. Zezwól na dostęp do GPS.");
-                }
-            );
-        }
+    if (routeControl && destination) {
+        routeControl.setWaypoints([userPos, destination]);
+    }
 
-        // 4. Funkcja wyszukiwania celu i rysowania trasy
-        function startNavigation() {
-    const adresDocelowy = document.getElementById('destination').value;
-    if (!adresDocelowy) return alert("Wpisz adres docelowy!");
-    if (!mojaLokalizacja) return alert("Czekam na sygnał GPS z Twojego urządzenia...");
+}, err => console.log(err), {
+    enableHighAccuracy:true,
+    maximumAge:1000
+});
 
-    // 1. Poprawiony i bezpieczny adres URL (wykorzystuje otwarte proxy bez blokad CORS)
-    const url = "https://openstreetmap.org" + encodeURIComponent(adresDocelowy);
+// ===== START =====
+function startNav(){
+    const q = document.getElementById("dest").value;
+    if(!q) return alert("Wpisz cel");
+    if(!userPos) return alert("Brak GPS");
 
-    fetch(url, {
-        headers: {
-            'Accept': 'application/json'
-        }
-    })
-    .then(res => {
-        if (!res.ok) throw new Error("Błąd sieci");
-        return res.json();
-    })
-    .then(dane => {
-        if (!dane || dane.length === 0) return alert("Nie znaleziono takiego adresu.");
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`)
+    .then(r=>r.json())
+    .then(data=>{
 
-        const celWspolrzedne = [parseFloat(dane[0].lat), parseFloat(dane[0].lon)];
+        if(!data.length) return alert("Nie znaleziono");
 
-        // Czyszczenie starej trasy
-        if (kontrolerTrasy) {
-            map.removeControl(kontrolerTrasy);
-        }
+        destination = L.latLng(data[0].lat, data[0].lon);
 
-        // Rysowanie nowej linii trasy samochodowej
-        kontrolerTrasy = L.Routing.control({
-            waypoints: [
-                L.latLng(mojaLokalizacja[0], mojaLokalizacja[1]),
-                L.latLng(celWspolrzedne[0], celWspolrzedne[1])
-            ],
-            router: L.Routing.osrmv1({
-                serviceUrl: 'https://project-osrm.org'
-            }),
-            lineOptions: {
-                styles: [{ color: '#ff0055', opacity: 0.8, weight: 6 }]
-            },
-            createMarker: function() { return null; } // Zapobiega błędom ikon wtyczki
-        }).addTo(map);
+        map.setView(destination, 13);
 
-        // Automatyczne dopasowanie widoku mapy do całej trasy
-        const bounds = L.latLngBounds([mojaLokalizacja, celWspolrzedne]);
-        map.fitBounds(bounds);
-    })
-    .catch(error => {
-        console.error("Szczegóły błędu:", error);
-        alert("Wystąpił problem z połączeniem. Spróbuj wpisać prostszą nazwę miasta (np. 'Warszawa').");
+        drawRoute();
+
     });
 }
 
-    </script>
-    </body>
+// ===== ROUTE =====
+function drawRoute(){
+
+    if(routeControl){
+        map.removeControl(routeControl);
+    }
+
+    routeControl = L.Routing.control({
+        waypoints:[userPos,destination],
+        router: L.Routing.osrmv1({
+            serviceUrl:"https://router.project-osrm.org/route/v1"
+        }),
+        addWaypoints:false,
+        draggableWaypoints:false,
+        fitSelectedRoutes:true,
+        show:false,
+        lineOptions:{
+            styles:[{color:"#00f3ff",weight:6}]
+        },
+        createMarker: ()=>null
+    }).addTo(map);
+}
+
+// ===== STOP =====
+function stopNav(){
+
+    destination = null;
+
+    if(routeControl){
+        map.removeControl(routeControl);
+        routeControl = null;
+    }
+
+    alert("Nawigacja zatrzymana");
+}
+</script>
+
+</body>
 </html>
