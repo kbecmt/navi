@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nawigacja Samochodowa</title>
-    
-    <!-- Style dla mapy Leaflet -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
- <!-- Style dla wtyczki wyznaczania tras -->
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Nawigacja Samochodowa</title>
 
-    <style>
+        <!-- Style dla mapy Leaflet -->
+        <link rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <!-- Style dla wtyczki wyznaczania tras -->
+
+        <style>
         * {
             box-sizing: border-box;
             margin: 0;
@@ -73,22 +74,22 @@
             opacity: 0.95;
         }
     </style>
-</head>
-<body>
+    </head>
+    <body>
 
-    <div id="nav-panel">
-        <h3>Nawigacja GPS</h3>
-        <input type="text" id="destination" placeholder="Wpisz cel (np. Warszawa, Al. Jerozolimskie)">
-        <button onclick="startNavigation()">Wyznacz trasę</button>
-    </div>
+        <div id="nav-panel">
+            <h3>Nawigacja GPS</h3>
+            <input type="text" id="destination"
+                placeholder="Wpisz cel (np. Warszawa, Al. Jerozolimskie)">
+            <button onclick="startNavigation()">Wyznacz trasę</button>
+        </div>
 
-    <div id="map"></div>
+        <div id="map"></div>
 
-    <!-- Skrypty Leaflet i Leaflet Routing Machine -->
-     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <!-- Skrypty Leaflet i Leaflet Routing Machine -->
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-
-    <script>
+        <script>
         let map;
         let userLocation = null;
         let routingControl = null;
@@ -121,47 +122,57 @@
 
         // 4. Funkcja wyszukiwania celu i rysowania trasy
         function startNavigation() {
-            const destQuery = document.getElementById('destination').value;
-            if (!destQuery) return alert("Wpisz adres docelowy!");
-            if (!userLocation) return alert("Czekam na Twoją pozycję GPS...");
+    const adresDocelowy = document.getElementById('destination').value;
+    if (!adresDocelowy) return alert("Wpisz adres docelowy!");
+    if (!mojaLokalizacja) return alert("Czekam na sygnał GPS z Twojego urządzenia...");
 
-            // Używamy darmowego API Nominatim do zamiany tekstu (adresu) na współrzędne geograficzne
-            fetch(`https://openstreetmap.org{encodeURIComponent(destQuery)}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.length === 0) return alert("Nie znaleziono takiego adresu.");
+    // 1. Poprawiony i bezpieczny adres URL (wykorzystuje otwarte proxy bez blokad CORS)
+    const url = "https://openstreetmap.org" + encodeURIComponent(adresDocelowy);
 
-                    const destLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-
-                    // Jeśli trasa już istniała, usuwamy ją przed stworzeniem nowej
-                    if (routingControl) {
-                        map.removeControl(routingControl);
-                    }
-
-                    // Rysowanie nowej trasy samochodowej
-                    routingControl = L.Routing.control({
-                        waypoints: [
-                            L.latLng(userLocation[0], userLocation[1]),
-                            L.latLng(destLocation[0], destLocation[1])
-                        ],
-                        router: L.Routing.osrmv1({
-                            serviceUrl: `https://project-osrm.org` // Publiczny silnik tras samochodowych
-                        }),
-                        lineOptions: {
-                            styles: [{ color: '#007bff', opacity: 0.8, weight: 6 }]
-                        },
-                        createMarker: function() { return null; } // Ukrywa domyślne pinezki wtyczki trasy
-                    }).addTo(map);
-
-                    // Dopasowanie widoku mapy do całej trasy
-                    const bounds = L.latLngBounds([userLocation, destLocation]);
-                    map.fitBounds(bounds);
-                })
-                .catch(err => {
-                    console.error(err);
-                    alert("Wystąpił błąd podczas wyszukiwania adresu.");
-                });
+    fetch(url, {
+        headers: {
+            'Accept': 'application/json'
         }
+    })
+    .then(res => {
+        if (!res.ok) throw new Error("Błąd sieci");
+        return res.json();
+    })
+    .then(dane => {
+        if (!dane || dane.length === 0) return alert("Nie znaleziono takiego adresu.");
+
+        const celWspolrzedne = [parseFloat(dane[0].lat), parseFloat(dane[0].lon)];
+
+        // Czyszczenie starej trasy
+        if (kontrolerTrasy) {
+            map.removeControl(kontrolerTrasy);
+        }
+
+        // Rysowanie nowej linii trasy samochodowej
+        kontrolerTrasy = L.Routing.control({
+            waypoints: [
+                L.latLng(mojaLokalizacja[0], mojaLokalizacja[1]),
+                L.latLng(celWspolrzedne[0], celWspolrzedne[1])
+            ],
+            router: L.Routing.osrmv1({
+                serviceUrl: 'https://project-osrm.org'
+            }),
+            lineOptions: {
+                styles: [{ color: '#ff0055', opacity: 0.8, weight: 6 }]
+            },
+            createMarker: function() { return null; } // Zapobiega błędom ikon wtyczki
+        }).addTo(map);
+
+        // Automatyczne dopasowanie widoku mapy do całej trasy
+        const bounds = L.latLngBounds([mojaLokalizacja, celWspolrzedne]);
+        map.fitBounds(bounds);
+    })
+    .catch(error => {
+        console.error("Szczegóły błędu:", error);
+        alert("Wystąpił problem z połączeniem. Spróbuj wpisać prostszą nazwę miasta (np. 'Warszawa').");
+    });
+}
+
     </script>
-</body>
+    </body>
 </html>
