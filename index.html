@@ -7,122 +7,194 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 <style>
+:root{
+    --bg-primary:rgba(10,10,20,0.97);
+    --bg-secondary:rgba(20,20,35,0.95);
+    --bg-card:rgba(255,255,255,0.06);
+    --bg-map:#1a1a2e;
+    --text-primary:#ffffff;
+    --text-secondary:rgba(255,255,255,0.7);
+    --text-muted:rgba(255,255,255,0.4);
+    --accent:#2979ff;
+    --accent2:#00e89d;
+    --danger:#e53935;
+    --danger-bg:rgba(220,30,30,0.95);
+    --border:rgba(255,255,255,0.08);
+    --shadow:0 4px 24px rgba(0,0,0,0.5);
+    --sidebar-bg:rgba(15,15,25,0.92);
+    --topbar-grad:linear-gradient(180deg,#2979ff,#1565c0);
+    --speed-ok:#00e89d;
+    --speed-warn:#ff9500;
+    --speed-over:#ff3b3b;
+}
+body.day-mode{
+    --bg-primary:rgba(245,245,250,0.97);
+    --bg-secondary:rgba(240,240,248,0.95);
+    --bg-card:rgba(0,0,0,0.04);
+    --bg-map:#e8e8f0;
+    --text-primary:#1a1a2e;
+    --text-secondary:rgba(30,30,50,0.7);
+    --text-muted:rgba(30,30,50,0.4);
+    --accent:#1565c0;
+    --border:rgba(0,0,0,0.08);
+    --shadow:0 4px 24px rgba(0,0,0,0.15);
+    --sidebar-bg:rgba(245,245,250,0.95);
+    --topbar-grad:linear-gradient(180deg,#1565c0,#0d47a1);
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body,html{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:white;-webkit-tap-highlight-color:transparent}
-#map{width:100%;height:100%;background:#1a1a2e}
+body,html{height:100%;overflow:hidden;background:var(--bg-map);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--text-primary);-webkit-tap-highlight-color:transparent;transition:background 0.5s}
+#map{width:100%;height:100%;background:var(--bg-map);transition:background 0.5s}
 
-/* ===== TOP NAV BAR (Waze style) ===== */
+/* ===== TOP NAV BAR (TomTom style) ===== */
 #topBar{
     position:absolute;top:0;left:0;right:0;z-index:1100;
-    background:linear-gradient(180deg,#2979ff,#1565c0);
+    background:var(--topbar-grad);
     color:white;display:none;flex-direction:column;
-    box-shadow:0 4px 24px rgba(0,0,0,0.5);
+    box-shadow:var(--shadow);
 }
 #topBar.show{display:flex}
 #topBar .nav-row{
-    display:flex;align-items:center;padding:14px 16px 8px;gap:12px;
+    display:flex;align-items:center;padding:12px 14px 6px;gap:10px;
 }
 #topBar .turn-arrow{
-    font-size:36px;min-width:44px;text-align:center;
+    font-size:40px;min-width:50px;text-align:center;
     filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));
 }
 #topBar .nav-info{flex:1}
-#topBar .nav-dist{font-size:32px;font-weight:800;line-height:1}
-#topBar .nav-street{font-size:16px;font-weight:600;margin-top:2px;opacity:0.95}
+#topBar .nav-dist{font-size:36px;font-weight:900;line-height:1}
+#topBar .nav-dist-unit{font-size:16px;font-weight:600;opacity:0.85}
+#topBar .nav-street{font-size:15px;font-weight:600;margin-top:2px;opacity:0.95}
 #topBar .nav-road-badge{
     display:inline-flex;align-items:center;gap:4px;
     background:rgba(255,255,255,0.15);border-radius:6px;
-    padding:3px 8px;font-size:12px;font-weight:700;margin-top:4px;
+    padding:3px 8px;font-size:12px;font-weight:700;margin-top:3px;
 }
 #topBar .nav-road-badge .badge{background:#e53935;color:white;border-radius:4px;padding:1px 5px;font-size:11px;font-weight:800}
 #topBar .nav-road-badge .badge.green{background:#43a047}
 
-/* Traffic alert bar */
-#trafficBar{
-    display:none;align-items:center;gap:10px;
-    background:rgba(220,30,30,0.92);padding:8px 16px;
-    font-size:13px;font-weight:600;
+/* Lane guidance */
+#laneBar{
+    display:none;align-items:center;gap:6px;padding:4px 14px 8px;
 }
-#trafficBar.show{display:flex}
-#trafficBar .t-icon{font-size:18px}
-#trafficBar .t-info{flex:1}
-#trafficBar .t-dist{font-weight:800;font-size:15px}
-#trafficBar .t-time{opacity:0.8;font-size:12px}
-#trafficBar .t-speed{
-    background:white;color:#c62828;border-radius:50%;
-    width:28px;height:28px;display:flex;align-items:center;justify-content:center;
-    font-size:13px;font-weight:800;
+#laneBar.show{display:flex}
+.lane-arrow{
+    width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+    border-radius:6px;background:rgba(255,255,255,0.15);font-size:16px;font-weight:700;
 }
+.lane-arrow.active{background:rgba(255,255,255,0.35)}
 
-/* ===== BOTTOM BAR (Waze style) ===== */
-#bottomBar{
-    position:absolute;bottom:0;left:0;right:0;z-index:1100;
-    background:rgba(20,20,30,0.95);backdrop-filter:blur(16px);
-    display:none;flex-direction:column;
-    border-top:1px solid rgba(255,255,255,0.08);
+/* Next turn hint */
+#nextTurnHint{
+    display:none;align-items:center;gap:8px;
+    padding:6px 14px 10px;font-size:12px;opacity:0.85;
 }
-#bottomBar.show{display:flex}
-#bottomBar .bar-row{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:12px 16px 8px;
-}
-#bottomBar .bar-eta{
-    display:flex;align-items:center;gap:8px;
-}
-#bottomBar .bar-eta .clock-icon{font-size:18px;opacity:0.7}
-#bottomBar .bar-eta .eta-time{font-size:28px;font-weight:800;letter-spacing:1px}
-#bottomBar .bar-stats{
-    display:flex;align-items:center;gap:16px;
-    padding:0 16px 12px;font-size:13px;opacity:0.7;
-}
-#bottomBar .bar-stats .stat{display:flex;align-items:center;gap:4px}
-#bottomBar .bar-stats .stat b{font-weight:700;opacity:1}
-#bottomBar .bar-stats .traffic-delay{color:#ff5252;font-weight:700;opacity:1}
-#bottomBar .bar-close{
-    background:none;border:none;color:white;font-size:22px;
-    cursor:pointer;padding:8px;opacity:0.6;
-}
-#bottomBar .bar-close:hover{opacity:1}
+#nextTurnHint.show{display:flex}
+#nextTurnHint .nt-arrow{font-size:20px}
+#nextTurnHint .nt-dist{font-weight:700;font-size:14px}
+#nextTurnHint .nt-sep{opacity:0.4}
 
-/* ===== RIGHT SIDE BUTTONS ===== */
-#rightBtns{
-    position:absolute;right:10px;top:50%;transform:translateY(-50%);
-    z-index:1050;display:none;flex-direction:column;gap:10px;
+/* ===== RIGHT SIDEBAR (TomTom style) ===== */
+#rightSidebar{
+    position:absolute;top:0;right:0;bottom:0;width:56px;z-index:1050;
+    display:none;flex-direction:column;align-items:center;
+    background:var(--sidebar-bg);backdrop-filter:blur(12px);
+    border-left:1px solid var(--border);
+    padding-top:8px;gap:0;
 }
-#rightBtns.show{display:flex}
-.rbtn{
-    width:44px;height:44px;border-radius:50%;border:none;
-    background:rgba(255,255,255,0.92);color:#333;
-    font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+#rightSidebar.show{display:flex}
+
+.sidebar-time{
+    font-size:18px;font-weight:800;padding:8px 0 2px;text-align:center;
+    letter-spacing:0.5px;
+}
+.sidebar-eta-row{
+    display:flex;flex-direction:column;align-items:center;
+    padding:2px 0 6px;font-size:11px;color:var(--text-secondary);
+}
+.sidebar-eta-row .eta-dist{font-weight:700;font-size:13px;color:var(--text-primary)}
+.sidebar-eta-row .eta-delay{color:#ff5252;font-weight:700;font-size:11px}
+
+/* Route progress strip */
+.sidebar-strip{flex:1;width:100%;display:flex;flex-direction:column;align-items:center;padding:4px 0}
+.sidebar-strip-track{width:6px;flex:1;background:var(--border);border-radius:3px;position:relative;overflow:visible}
+.sidebar-strip-progress{position:absolute;top:0;left:0;right:0;background:linear-gradient(180deg,#00e89d,#00a2ff);border-radius:3px;transition:height 0.5s ease}
+.sidebar-strip-marker{position:absolute;left:50%;transform:translateX(-50%);pointer-events:auto;z-index:2}
+.sidebar-strip-marker .dot{width:12px;height:12px;border-radius:50%;border:2px solid white;flex-shrink:0}
+.sidebar-strip-marker .dot.turn{background:#ff9500}
+.sidebar-strip-marker .dot.camera{background:#ff3b3b}
+.sidebar-strip-marker .dot.finish{background:#00e89d}
+.sidebar-strip-marker .dot.traffic{background:#ff3b3b}
+.sidebar-strip-marker .dot.fuel{background:#43a047}
+.sidebar-strip-marker .dot.user{background:#2979ff;width:14px;height:14px}
+
+.sidebar-bottom-icons{
+    display:flex;flex-direction:column;align-items:center;gap:6px;
+    padding:8px 0;border-top:1px solid var(--border);
+}
+.sidebar-icon-btn{
+    width:38px;height:38px;border-radius:50%;border:none;
+    background:rgba(255,255,255,0.85);color:#333;
+    font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 10px rgba(0,0,0,0.3);
-    transition:transform 0.15s;
 }
-.rbtn:active{transform:scale(0.9)}
-.rbtn.active{background:#2979ff;color:white}
+.sidebar-icon-btn:active{background:var(--accent);color:white}
+body.day-mode .sidebar-icon-btn{background:rgba(20,20,30,0.85);color:white}
 
-/* ===== SPEED LIMIT + CURRENT SPEED ===== */
-#speedPanel{
-    position:absolute;bottom:100px;left:16px;z-index:1100;
-    display:none;flex-direction:column;align-items:center;gap:4px;
+/* ===== BOTTOM SPEED BAR ===== */
+#speedBar{
+    position:absolute;bottom:0;left:0;right:0;z-index:1100;
+    background:var(--bg-secondary);backdrop-filter:blur(16px);
+    display:none;flex-direction:column;
+    border-top:1px solid var(--border);
 }
-#speedPanel.show{display:flex}
-#speedLimit{
-    width:52px;height:52px;border-radius:50%;
-    border:3px solid #e53935;background:white;color:#111;
-    font-size:20px;font-weight:800;
+#speedBar.show{display:flex}
+#speedBar .sb-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:8px 14px 6px;gap:12px;
+}
+#speedBar .sb-close{
+    background:none;border:none;color:var(--text-primary);font-size:22px;
+    cursor:pointer;padding:6px;opacity:0.6;
+}
+#speedBar .sb-close:hover{opacity:1}
+#speedBar .sb-stats{
+    display:flex;align-items:center;gap:14px;
+    padding:0 14px 8px;font-size:12px;color:var(--text-secondary);
+}
+#speedBar .sb-stats .stat{display:flex;align-items:center;gap:4px}
+#speedBar .sb-stats .stat b{font-weight:700;color:var(--text-primary)}
+#speedBar .sb-stats .traffic-delay{color:#ff5252;font-weight:700}
+
+/* Speedometer cluster (bottom center, TomTom style) */
+#speedCluster{
+    position:absolute;bottom:60px;left:50%;transform:translateX(-50%);z-index:1150;
+    display:none;flex-direction:column;align-items:center;gap:2px;
+}
+#speedCluster.show{display:flex}
+#speedCluster .sc-ring{
+    width:90px;height:90px;border-radius:50%;
+    background:rgba(0,0,0,0.75);border:4px solid var(--speed-ok);
+    display:flex;align-items:center;justify-content:center;flex-direction:column;
+    box-shadow:0 4px 20px rgba(0,0,0,0.5);
+    transition:border-color 0.3s;
+}
+#speedCluster .sc-ring.warn{border-color:var(--speed-warn)}
+#speedCluster .sc-ring.over{border-color:var(--speed-over);animation:pulseOver 0.8s ease infinite}
+#speedCluster .sc-current{font-size:28px;font-weight:900;line-height:1}
+#speedCluster .sc-unit{font-size:10px;font-weight:600;opacity:0.7}
+#speedCluster .sc-limit{
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 2px 10px rgba(0,0,0,0.4);
+    width:32px;height:32px;border-radius:50%;
+    border:2.5px solid var(--danger);background:white;color:#111;
+    font-size:13px;font-weight:800;margin-top:-6px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
 }
-#speedCurrent{
-    font-size:16px;font-weight:700;color:white;
-    text-shadow:0 1px 4px rgba(0,0,0,0.6);
-}
-#speedCurrent.over{color:#ff5252}
+@keyframes pulseOver{0%,100%{box-shadow:0 0 0 0 rgba(255,59,59,0.4)}50%{box-shadow:0 0 0 12px rgba(255,59,59,0)}}
 
 /* ===== CAMERA ALERT ===== */
 #cameraAlert{
-    position:absolute;top:100px;left:50%;transform:translateX(-50%) translateY(-60px);
-    z-index:1200;background:rgba(220,30,30,0.95);color:white;
+    position:absolute;top:140px;left:50%;transform:translateX(-50%) translateY(-60px);
+    z-index:1200;background:var(--danger-bg);color:white;
     padding:10px 20px;border-radius:14px;font-weight:bold;font-size:14px;
     display:flex;align-items:center;gap:10px;
     box-shadow:0 4px 20px rgba(255,0,0,0.4);
@@ -133,62 +205,114 @@ body,html{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-syst
 #cameraAlert .cam-text .cam-dist{font-size:16px;font-weight:800}
 #cameraAlert .cam-text .cam-speed{font-size:11px;opacity:0.8}
 
-/* ===== REPORT PANEL (left) ===== */
-#reportPanel{
-    position:absolute;top:0;left:0;bottom:0;width:280px;z-index:1200;
-    background:rgba(20,20,30,0.97);backdrop-filter:blur(16px);
-    transform:translateX(-100%);transition:transform 0.3s cubic-bezier(.4,0,.2,1);
-    display:flex;flex-direction:column;padding:16px;
-    box-shadow:4px 0 20px rgba(0,0,0,0.5);
+/* ===== VOICE TOAST ===== */
+#voiceToast{
+    position:absolute;bottom:170px;left:50%;transform:translateX(-50%);
+    z-index:1200;background:var(--accent);color:white;
+    padding:8px 18px;border-radius:20px;font-size:12px;
+    opacity:0;transition:opacity 0.3s;pointer-events:none;
+    white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;
 }
-#reportPanel.open{transform:translateX(0)}
-#reportPanel .rp-header{
-    display:flex;align-items:center;justify-content:space-between;
-    margin-bottom:16px;
-}
-#reportPanel .rp-header h3{font-size:16px;font-weight:700}
-#reportPanel .rp-close{background:none;border:none;color:white;font-size:20px;cursor:pointer;opacity:0.6}
-#reportPanel .rp-close:hover{opacity:1}
-#reportPanel .rp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.rp-item{
-    display:flex;flex-direction:column;align-items:center;gap:6px;
-    padding:14px 8px;border-radius:12px;
-    background:rgba(255,255,255,0.06);cursor:pointer;
-    transition:background 0.15s;
-}
-.rp-item:active{background:rgba(255,255,255,0.12)}
-.rp-item .rp-icon{font-size:28px}
-.rp-item .rp-label{font-size:11px;font-weight:600;text-align:center;opacity:0.8}
+#voiceToast.show{opacity:1}
 
-/* ===== SETTINGS PANEL (right) ===== */
-#settingsPanel{
-    position:absolute;top:0;right:0;bottom:0;width:280px;z-index:1200;
-    background:rgba(20,20,30,0.97);backdrop-filter:blur(16px);
-    transform:translateX(100%);transition:transform 0.3s cubic-bezier(.4,0,.2,1);
-    display:flex;flex-direction:column;padding:16px;
-    box-shadow:-4px 0 20px rgba(0,0,0,0.5);
+/* ===== MAIN MENU PANEL ===== */
+#mainMenu{
+    position:absolute;top:0;left:0;bottom:0;width:300px;z-index:1300;
+    background:var(--bg-primary);backdrop-filter:blur(16px);
+    transform:translateX(-100%);transition:transform 0.3s cubic-bezier(.4,0,.2,1);
+    display:flex;flex-direction:column;
+    box-shadow:4px 0 30px rgba(0,0,0,0.5);
 }
-#settingsPanel.open{transform:translateX(0)}
-#settingsPanel .sp-header{
+#mainMenu.open{transform:translateX(0)}
+.mm-header{
+    display:flex;align-items:center;gap:12px;
+    padding:20px 16px 16px;border-bottom:1px solid var(--border);
+}
+.mm-header h2{font-size:18px;font-weight:700}
+.mm-close{background:none;border:none;color:var(--text-primary);font-size:22px;cursor:pointer;opacity:0.6}
+
+/* Search */
+.mm-search{padding:12px 16px}
+.mm-search input{
+    width:100%;padding:12px 14px 12px 38px;border:1px solid var(--border);
+    border-radius:12px;background:var(--bg-card);color:var(--text-primary);
+    font-size:15px;outline:none;
+}
+.mm-search input::placeholder{color:var(--text-muted)}
+.mm-search input:focus{border-color:var(--accent)}
+.mm-search-wrap{position:relative}
+.mm-search-wrap .search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px;opacity:0.5}
+.mm-search .search-go{
+    margin-top:8px;width:100%;padding:12px;border:none;border-radius:12px;
+    background:var(--accent);color:white;font-size:15px;font-weight:700;cursor:pointer;
+}
+.mm-search .search-go:active{opacity:0.8}
+
+/* Menu items */
+.mm-items{flex:1;overflow-y:auto;padding:8px 0}
+.mm-item{
+    display:flex;align-items:center;gap:12px;
+    padding:14px 20px;cursor:pointer;transition:background 0.15s;
+    color:var(--text-primary);font-size:15px;font-weight:500;
+}
+.mm-item:active{background:var(--bg-card)}
+.mm-item .mm-icon{font-size:20px;width:28px;text-align:center}
+.mm-item .mm-label{flex:1}
+.mm-item .mm-arrow{opacity:0.3;font-size:14px}
+
+/* Day/Night toggle */
+.mm-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 20px}
+.mm-toggle-row span{font-size:15px;font-weight:500}
+.mm-toggle{
+    width:44px;height:24px;border-radius:12px;
+    background:var(--bg-card);position:relative;cursor:pointer;
+    transition:background 0.2s;border:1px solid var(--border);
+}
+.mm-toggle.on{background:var(--accent);border-color:var(--accent)}
+.mm-toggle::after{
+    content:'';position:absolute;top:2px;left:2px;
+    width:18px;height:18px;border-radius:50%;background:white;
+    transition:transform 0.2s;
+}
+.mm-toggle.on::after{transform:translateX(20px)}
+
+/* ===== SETTINGS SUB-PANEL ===== */
+#settingsSub{
+    position:absolute;top:0;left:0;right:0;bottom:0;z-index:1350;
+    background:var(--bg-primary);backdrop-filter:blur(16px);
+    transform:translateX(-100%);transition:transform 0.3s cubic-bezier(.4,0,.2,1);
+    display:flex;flex-direction:column;
+}
+#settingsSub.open{transform:translateX(0)}
+.ss-header{
+    display:flex;align-items:center;gap:12px;
+    padding:20px 16px 16px;border-bottom:1px solid var(--border);
+}
+.ss-header h2{font-size:18px;font-weight:700;flex:1}
+.ss-close,.ss-back{background:none;border:none;color:var(--text-primary);font-size:22px;cursor:pointer;opacity:0.6}
+.ss-body{flex:1;overflow-y:auto;padding:12px 0}
+.ss-section{padding:12px 20px}
+.ss-section h4{font-size:12px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;letter-spacing:0.5px}
+.ss-row{
     display:flex;align-items:center;justify-content:space-between;
-    margin-bottom:16px;
+    padding:10px 0;border-bottom:1px solid var(--border);
 }
-#settingsPanel .sp-header h3{font-size:16px;font-weight:700}
-#settingsPanel .sp-close{background:none;border:none;color:white;font-size:20px;cursor:pointer;opacity:0.6}
-#settingsPanel .sp-section{margin-bottom:16px}
-#settingsPanel .sp-section h4{font-size:12px;text-transform:uppercase;opacity:0.5;margin-bottom:8px;letter-spacing:0.5px}
+.ss-row label{font-size:14px;font-weight:500}
+.ss-row .ss-val{display:flex;align-items:center;gap:8px}
+.ss-row input[type=range]{width:120px;accent-color:var(--accent)}
+.ss-row .ss-num{font-size:14px;font-weight:700;color:var(--accent);min-width:36px;text-align:right}
 .route-types{display:flex;gap:8px}
 .route-type{
     flex:1;padding:10px 6px;border-radius:10px;text-align:center;
-    background:rgba(255,255,255,0.06);cursor:pointer;
+    background:var(--bg-card);cursor:pointer;
     border:2px solid transparent;transition:all 0.15s;
 }
-.route-type.active{border-color:#2979ff;background:rgba(41,121,255,0.15)}
+.route-type.active{border-color:var(--accent);background:rgba(41,121,255,0.15)}
 .route-type .rt-icon{font-size:22px}
 .route-type .rt-label{font-size:11px;font-weight:600;margin-top:4px}
 .avoid-item{
     display:flex;align-items:center;justify-content:space-between;
-    padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);
+    padding:10px 0;border-bottom:1px solid var(--border);
 }
 .avoid-item .ai-left{display:flex;align-items:center;gap:8px;font-size:13px}
 .avoid-item .ai-icon{font-size:16px;opacity:0.6}
@@ -197,85 +321,51 @@ body,html{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-syst
     background:rgba(255,255,255,0.15);position:relative;cursor:pointer;
     transition:background 0.2s;
 }
-.toggle.on{background:#2979ff}
+.toggle.on{background:var(--accent)}
 .toggle::after{
     content:'';position:absolute;top:2px;left:2px;
     width:18px;height:18px;border-radius:50%;background:white;
     transition:transform 0.2s;
 }
 .toggle.on::after{transform:translateX(18px)}
-.sp-actions{display:flex;gap:8px;margin-top:auto;padding-top:12px}
-.sp-actions button{
-    flex:1;padding:10px;border:none;border-radius:10px;
-    font-weight:700;font-size:13px;cursor:pointer;
-}
-.sp-actions .sp-cancel{background:rgba(255,255,255,0.08);color:white}
-.sp-actions .sp-save{background:#2979ff;color:white}
+body.day-mode .toggle{background:rgba(0,0,0,0.12)}
+body.day-mode .toggle.on{background:var(--accent)}
 
-/* ===== DESTINATION PANEL ===== */
-#destPanel{
-    position:absolute;top:0;left:0;right:0;bottom:0;z-index:1300;
-    background:rgba(10,10,20,0.97);backdrop-filter:blur(16px);
-    display:none;flex-direction:column;padding:20px;
+/* ===== OVERLAY ===== */
+#overlay{
+    position:absolute;top:0;left:0;right:0;bottom:0;z-index:1250;
+    background:rgba(0,0,0,0.4);display:none;
 }
-#destPanel.open{display:flex}
-#destPanel .dp-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-#destPanel .dp-back{background:none;border:none;color:white;font-size:22px;cursor:pointer}
-#destPanel .dp-title{font-size:18px;font-weight:700}
-#destPanel input{
-    width:100%;padding:14px;border:1px solid rgba(255,255,255,0.12);
-    border-radius:12px;background:rgba(255,255,255,0.06);color:white;
-    font-size:16px;outline:none;
-}
-#destPanel input::placeholder{color:#555}
-#destPanel input:focus{border-color:#2979ff}
-#destPanel .dp-btn{
-    margin-top:12px;padding:14px;border:none;border-radius:12px;
-    background:#2979ff;color:white;font-size:16px;font-weight:700;cursor:pointer;
-}
-#destPanel .dp-btn:active{opacity:0.8}
-#destPanel .dp-voice{
-    margin-top:8px;padding:10px;border:none;border-radius:10px;
-    background:rgba(255,255,255,0.06);color:#aaa;font-size:13px;cursor:pointer;
-}
-#destPanel .dp-voice.muted{color:#f66;text-decoration:line-through}
+#overlay.show{display:block}
 
-/* ===== VOICE TOAST ===== */
-#voiceToast{
-    position:absolute;bottom:120px;left:50%;transform:translateX(-50%);
-    z-index:1200;background:rgba(41,121,255,0.92);color:white;
-    padding:8px 18px;border-radius:20px;font-size:12px;
-    opacity:0;transition:opacity 0.3s;pointer-events:none;
-    white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;
-}
-#voiceToast.show{opacity:1}
-
+/* ===== USER ARROW ===== */
 .user-arrow{width:30px;height:30px}
 
-/* ===== ROUTE STRIP (right side) ===== */
-#routeStrip{
-    position:absolute;top:120px;right:6px;width:46px;bottom:120px;
-    z-index:1050;display:none;flex-direction:column;align-items:center;pointer-events:none;
+/* ===== SPEED OVERLAY WARNING ===== */
+#speedWarning{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    z-index:1250;background:rgba(255,0,0,0.85);color:white;
+    padding:16px 32px;border-radius:16px;font-weight:900;font-size:22px;
+    display:none;align-items:center;gap:12px;
+    box-shadow:0 4px 30px rgba(255,0,0,0.6);
+    animation:pulseWarning 1s ease infinite;
+    pointer-events:none;
 }
-#routeStrip.show{display:flex}
-.strip-track{width:4px;flex:1;background:rgba(255,255,255,0.1);border-radius:2px;position:relative;overflow:hidden}
-.strip-progress{position:absolute;top:0;left:0;right:0;background:linear-gradient(180deg,#00e89d,#00a2ff);border-radius:2px;transition:height 0.5s ease}
-.strip-marker{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;pointer-events:auto}
-.strip-marker .dot{width:10px;height:10px;border-radius:50%;border:2px solid white;flex-shrink:0}
-.strip-marker .dot.turn{background:#ff9500}
-.strip-marker .dot.camera{background:#ff3b3b}
-.strip-marker .dot.finish{background:#00e89d}
-.strip-marker .label{font-size:10px;font-weight:bold;white-space:nowrap;background:rgba(0,0,0,0.7);padding:2px 5px;border-radius:4px;position:absolute;right:14px}
+#speedWarning.show{display:flex}
+@keyframes pulseWarning{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.05)}}
 </style>
 </head>
 <body>
+
+<!-- ===== MAP ===== -->
+<div id="map"></div>
 
 <!-- ===== TOP NAV BAR ===== -->
 <div id="topBar">
     <div class="nav-row">
         <div class="turn-arrow" id="topArrow">⬆</div>
         <div class="nav-info">
-            <div class="nav-dist" id="topDist">—</div>
+            <div><span class="nav-dist" id="topDistNum">—</span><span class="nav-dist-unit" id="topDistUnit"></span></div>
             <div class="nav-street" id="topStreet">—</div>
             <div class="nav-road-badge" id="topRoadBadge" style="display:none">
                 <span class="badge" id="topRoadBadgeNum">—</span>
@@ -283,43 +373,58 @@ body,html{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-syst
             </div>
         </div>
     </div>
-    <div id="trafficBar">
-        <div class="t-icon">🚗</div>
-        <div class="t-info">
-            <div class="t-dist" id="tDist">—</div>
-            <div class="t-time" id="tTime">—</div>
+    <div id="laneBar"></div>
+    <div id="nextTurnHint">
+        <span class="nt-arrow" id="ntArrow">→</span>
+        <span class="nt-dist" id="ntDist">—</span>
+        <span class="nt-sep">·</span>
+        <span id="ntText">—</span>
+    </div>
+</div>
+
+<!-- ===== RIGHT SIDEBAR ===== -->
+<div id="rightSidebar">
+    <div class="sidebar-time" id="sbTime">—:—</div>
+    <div class="sidebar-eta-row">
+        <span class="eta-dist" id="sbDist">—</span>
+        <span class="eta-delay" id="sbDelay" style="display:none">🚗 —</span>
+    </div>
+    <div class="sidebar-strip">
+        <div class="sidebar-strip-track" id="sbTrack">
+            <div class="sidebar-strip-progress" id="sbProgress" style="height:0%"></div>
         </div>
-        <div class="t-speed" id="tSpeed">—</div>
+    </div>
+    <div class="sidebar-bottom-icons">
+        <button class="sidebar-icon-btn" id="btnSound" onclick="toggleVoice()" title="Dźwięk">🔊</button>
+        <button class="sidebar-icon-btn" onclick="openMainMenu()" title="Menu">☰</button>
     </div>
 </div>
 
-<!-- ===== BOTTOM BAR ===== -->
-<div id="bottomBar">
-    <div class="bar-row">
-        <div class="bar-eta">
-            <div class="clock-icon">🕐</div>
-            <div class="eta-time" id="etaTime">—:—</div>
+<!-- ===== SPEED CLUSTER (TomTom style) ===== -->
+<div id="speedCluster">
+    <div class="sc-ring" id="scRing">
+        <div class="sc-current" id="scCurrent">0</div>
+        <div class="sc-unit">km/h</div>
+    </div>
+    <div class="sc-limit" id="scLimit">—</div>
+</div>
+
+<!-- ===== SPEED BAR (bottom) ===== -->
+<div id="speedBar">
+    <div class="sb-row">
+        <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:14px;opacity:0.6">📏</span>
+            <b id="statDist" style="font-size:15px">—</b>
         </div>
-        <button class="bar-close" onclick="stopNav()">✕</button>
+        <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:14px;opacity:0.6">⏱</span>
+            <b id="statDur" style="font-size:15px">—</b>
+        </div>
+        <div id="statTraffic" style="display:none;color:#ff5252;font-weight:700;font-size:13px">
+            🚗 <span id="statTrafficVal">—</span>
+        </div>
+        <button class="sb-close" onclick="stopNav()">✕</button>
     </div>
-    <div class="bar-stats">
-        <div class="stat">📏 <b id="statDist">—</b></div>
-        <div class="stat">⏱ <b id="statDur">—</b></div>
-        <div class="stat traffic-delay" id="statTraffic" style="display:none">🚗 <b id="statTrafficVal">—</b></div>
-    </div>
-</div>
-
-<!-- ===== RIGHT SIDE BUTTONS ===== -->
-<div id="rightBtns">
-    <button class="rbtn" id="btnSound" onclick="toggleVoice()" title="Dźwięk">🔊</button>
-    <button class="rbtn" onclick="openReport()" title="Zgłoś">📢</button>
-    <button class="rbtn" onclick="openSettings()" title="Ustawienia">⚙️</button>
-</div>
-
-<!-- ===== SPEED PANEL ===== -->
-<div id="speedPanel">
-    <div id="speedLimit">—</div>
-    <div id="speedCurrent">0 km/h</div>
 </div>
 
 <!-- ===== CAMERA ALERT ===== -->
@@ -332,74 +437,55 @@ body,html{height:100%;overflow:hidden;background:#1a1a2e;font-family:-apple-syst
     </div>
 </div>
 
-<!-- ===== ROUTE STRIP ===== -->
-<div id="routeStrip">
-    <div class="strip-track" id="stripTrack">
-        <div class="strip-progress" id="stripProgress" style="height:0%"></div>
-    </div>
+<!-- ===== SPEED WARNING OVERLAY ===== -->
+<div id="speedWarning">
+    <span style="font-size:28px">⚠️</span>
+    <span id="speedWarnText">PRZEKROCZONO PRĘDKOŚĆ!</span>
 </div>
 
 <!-- ===== VOICE TOAST ===== -->
 <div id="voiceToast">—</div>
 
-<!-- ===== DESTINATION PANEL ===== -->
-<div id="destPanel">
-    <div class="dp-header">
-        <button class="dp-back" onclick="closeDest()">←</button>
-        <div class="dp-title">Cel podróży</div>
-    </div>
-    <input id="dest" placeholder="Wpisz adres lub miasto…" autocomplete="off">
-    <button class="dp-btn" onclick="startNav()">▶ Rozpocznij nawigację</button>
-    <button class="dp-voice" id="voiceBtn" onclick="toggleVoice()">🔊 Powiadomienia głosowe: ON</button>
-</div>
+<!-- ===== OVERLAY ===== -->
+<div id="overlay" onclick="closeMainMenu();closeSettingsSub()"></div>
 
-<!-- ===== REPORT PANEL ===== -->
-<div id="reportPanel">
-    <div class="rp-header">
-        <h3>📢 Zgłoś zdarzenie</h3>
-        <button class="rp-close" onclick="closeReport()">✕</button>
+<!-- ===== MAIN MENU ===== -->
+<div id="mainMenu">
+    <div class="mm-header">
+        <button class="mm-close" onclick="closeMainMenu()">✕</button>
+        <h2>🗺️ Nawigacja</h2>
     </div>
-    <div class="rp-grid">
-        <div class="rp-item" onclick="reportEvent('camera')"><div class="rp-icon">📸</div><div class="rp-label">Fotoradar</div></div>
-        <div class="rp-item" onclick="reportEvent('mobile')"><div class="rp-icon">📱</div><div class="rp-label">Mobilny radar</div></div>
-        <div class="rp-item" onclick="reportEvent('vehicle')"><div class="rp-icon">🚗</div><div class="rp-label">Pojazd stojący</div></div>
-        <div class="rp-item" onclick="reportEvent('roadworks')"><div class="rp-icon">🚧</div><div class="rp-label">Roboty drogowe</div></div>
-        <div class="rp-item" onclick="reportEvent('closed')"><div class="rp-icon">🚫</div><div class="rp-label">Zamknięta droga</div></div>
-        <div class="rp-item" onclick="reportEvent('danger')"><div class="rp-icon">⚠️</div><div class="rp-label">Niebezpieczeństwo</div></div>
-        <div class="rp-item" onclick="reportEvent('traffic')"><div class="rp-icon">🚦</div><div class="rp-label">Korek</div></div>
-        <div class="rp-item" onclick="reportEvent('police')"><div class="rp-icon">👮</div><div class="rp-label">Policja</div></div>
+    <div class="mm-search">
+        <div class="mm-search-wrap">
+            <span class="search-icon">🔍</span>
+            <input id="dest" placeholder="Wpisz adres lub miasto…" autocomplete="off">
+        </div>
+        <button class="search-go" onclick="startNav()">▶ Rozpocznij nawigację</button>
     </div>
-</div>
-
-<!-- ===== SETTINGS PANEL ===== -->
-<div id="settingsPanel">
-    <div class="sp-header">
-        <h3>⚙️ Ustawienia trasy</h3>
-        <button class="sp-close" onclick="closeSettings()">✕</button>
-    </div>
-    <div class="sp-section">
-        <h4>Typ trasy</h4>
-        <div class="route-types">
-            <div class="route-type active" onclick="setRouteType(this,'fast')"><div class="rt-icon">⚡</div><div class="rt-label">Szybka</div></div>
-            <div class="route-type" onclick="setRouteType(this,'eco')"><div class="rt-icon">🌿</div><div class="rt-label">Eko</div></div>
-            <div class="route-type" onclick="setRouteType(this,'short')"><div class="rt-icon">📏</div><div class="rt-label">Krótka</div></div>
+    <div class="mm-items">
+        <div class="mm-item" onclick="startNav();closeMainMenu()"><span class="mm-icon">📍</span><span class="mm-label">Wyznacz trasę</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openSettingsSub()"><span class="mm-icon">⚙️</span><span class="mm-label">Ustawienia trasy</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openSpeedSettings()"><span class="mm-icon">🚨</span><span class="mm-label">Alerty prędkości</span><span class="mm-arrow">›</span></div>
+        <div class="mm-toggle-row">
+            <span>🌙 Tryb nocny</span>
+            <div class="mm-toggle" id="dayNightToggle" onclick="toggleDayNight()"></div>
+        </div>
+        <div class="mm-toggle-row">
+            <span>🔊 Powiadomienia głosowe</span>
+            <div class="mm-toggle on" id="voiceToggle" onclick="toggleVoice()"></div>
         </div>
     </div>
-    <div class="sp-section">
-        <h4>Unikaj</h4>
-        <div class="avoid-item"><div class="ai-left"><span class="ai-icon">💰</span> Opłaty</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-        <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛤️</span> Drogi nieutwardzone</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-        <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛣️</span> Autostrady</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-        <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🏭</span> Strefy niskiej emisji</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-        <div class="avoid-item"><div class="ai-left"><span class="ai-icon">⛴️</span> Promy</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-    </div>
-    <div class="sp-actions">
-        <button class="sp-cancel" onclick="closeSettings()">Anuluj</button>
-        <button class="sp-save" onclick="closeSettings()">✓ Zapisz</button>
-    </div>
+    <button class="mm-item" onclick="stopNav();closeMainMenu()" style="color:var(--danger)"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span></button>
 </div>
 
-<div id="map"></div>
+<!-- ===== SETTINGS SUB-PANEL ===== -->
+<div id="settingsSub">
+    <div class="ss-header">
+        <button class="ss-back" onclick="closeSettingsSub()">←</button>
+        <h2 id="ssTitle">Ustawienia</h2>
+    </div>
+    <div class="ss-body" id="ssBody"></div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
@@ -419,36 +505,90 @@ let totalRouteDist=0,routeCoords=[];
 let lastSpokenIdx=-1,lastCameraSpoken=null;
 let nearestCameraDistance=Infinity;
 let routeType='fast';
-let spoken500m=new Set(); // tracks which instructions had 500m notification
-let spokenCameras500m=new Set(); // tracks which cameras had 500m notification
+let spoken500m=new Set();
+let spokenCameras500m=new Set();
+
+// ===== SETTINGS =====
+let speedAlertOver=10; // km/h over limit to trigger alert
+let speedAlertEnabled=true;
+let voiceEnabled=true;
+let isNightMode=true;
+let roadEventsLoaded=false; // loaded only once at route start
 
 // ===== PANELS =====
-function openDest(){document.getElementById('destPanel').classList.add('open')}
-function closeDest(){document.getElementById('destPanel').classList.remove('open')}
-function openReport(){document.getElementById('reportPanel').classList.add('open')}
-function closeReport(){document.getElementById('reportPanel').classList.remove('open')}
-function openSettings(){document.getElementById('settingsPanel').classList.add('open')}
-function closeSettings(){document.getElementById('settingsPanel').classList.remove('open')}
+function openMainMenu(){document.getElementById('mainMenu').classList.add('open');document.getElementById('overlay').classList.add('show')}
+function closeMainMenu(){document.getElementById('mainMenu').classList.remove('open');document.getElementById('overlay').classList.remove('show')}
+
+function openSettingsSub(){
+    closeMainMenu();
+    document.getElementById('ssTitle').textContent='Ustawienia trasy';
+    document.getElementById('ssBody').innerHTML=`
+        <div class="ss-section">
+            <h4>Typ trasy</h4>
+            <div class="route-types">
+                <div class="route-type ${routeType==='fast'?'active':''}" onclick="setRouteType(this,'fast')"><div class="rt-icon">⚡</div><div class="rt-label">Szybka</div></div>
+                <div class="route-type ${routeType==='eco'?'active':''}" onclick="setRouteType(this,'eco')"><div class="rt-icon">🌿</div><div class="rt-label">Eko</div></div>
+                <div class="route-type ${routeType==='short'?'active':''}" onclick="setRouteType(this,'short')"><div class="rt-icon">📏</div><div class="rt-label">Krótka</div></div>
+            </div>
+        </div>
+        <div class="ss-section">
+            <h4>Unikaj</h4>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">💰</span> Opłaty</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛤️</span> Drogi nieutwardzone</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">🛣️</span> Autostrady</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+            <div class="avoid-item"><div class="ai-left"><span class="ai-icon">⛴️</span> Promy</div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+        </div>
+    `;
+    document.getElementById('settingsSub').classList.add('open');
+}
+
+function openSpeedSettings(){
+    closeMainMenu();
+    document.getElementById('ssTitle').textContent='Alerty prędkości';
+    document.getElementById('ssBody').innerHTML=`
+        <div class="ss-section">
+            <h4>Powiadomienia o przekroczeniu prędkości</h4>
+            <div class="ss-row">
+                <label>Włącz alerty</label>
+                <div class="mm-toggle ${speedAlertEnabled?'on':''}" id="speedAlertToggle" onclick="speedAlertEnabled=!speedAlertEnabled;this.classList.toggle('on')"></div>
+            </div>
+            <div class="ss-row">
+                <label>Próg przekroczenia</label>
+                <div class="ss-val">
+                    <input type="range" min="1" max="30" value="${speedAlertOver}" id="speedAlertRange" oninput="speedAlertOver=parseInt(this.value);document.getElementById('speedAlertVal').textContent='+'+this.value+' km/h'">
+                    <span class="ss-num" id="speedAlertVal">+${speedAlertOver} km/h</span>
+                </div>
+            </div>
+        </div>
+        <div class="ss-section">
+            <h4>Dźwięk</h4>
+            <div class="ss-row">
+                <label>Głośność alarmu</label>
+                <div class="ss-val">
+                    <input type="range" min="1" max="10" value="8" id="alertVolRange">
+                    <span class="ss-num">8</span>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('settingsSub').classList.add('open');
+}
+
+function closeSettingsSub(){document.getElementById('settingsSub').classList.remove('open')}
+
 function setRouteType(el,type){
     document.querySelectorAll('.route-type').forEach(e=>e.classList.remove('active'));
     el.classList.add('active');
     routeType=type;
 }
-function reportEvent(type){
-    const names={camera:'Fotoradar',mobile:'Mobilny radar',vehicle:'Pojazd stojący',roadworks:'Roboty drogowe',closed:'Zamknięta droga',danger:'Niebezpieczeństwo',traffic:'Korek',police:'Policja'};
-    speak(`Zgłoszono: ${names[type]||type}`);
-    closeReport();
-}
 
 // ===== VOICE =====
-let voiceEnabled=true;
 function toggleVoice(){
     voiceEnabled=!voiceEnabled;
-    const b=document.getElementById('voiceBtn');
-    if(b) b.textContent=voiceEnabled?"🔊 Powiadomienia głosowe: ON":"🔇 Powiadomienia głosowe: OFF";
-    if(b) b.classList.toggle('muted',!voiceEnabled);
+    const b=document.getElementById('voiceToggle');
+    if(b) b.classList.toggle('on',voiceEnabled);
     const sb=document.getElementById('btnSound');
-    if(sb){sb.textContent=voiceEnabled?'🔊':'🔇';sb.classList.toggle('active',!voiceEnabled)}
+    if(sb) sb.textContent=voiceEnabled?'🔊':'🔇';
 }
 function speak(text){
     if(!voiceEnabled||!text)return;
@@ -460,6 +600,33 @@ function speak(text){
     u.onend=u.onerror=()=>t.classList.remove('show');
     window.speechSynthesis.speak(u);
 }
+
+// ===== DAY / NIGHT =====
+function toggleDayNight(){
+    isNightMode=!isNightMode;
+    document.body.classList.toggle('day-mode',!isNightMode);
+    document.getElementById('dayNightToggle').classList.toggle('on',isNightMode);
+    // Update map tiles
+    if(mapTilesLayer)map.removeLayer(mapTilesLayer);
+    loadMapTiles();
+}
+let mapTilesLayer=null;
+function loadMapTiles(){
+    if(isNightMode){
+        mapTilesLayer=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'&copy; OpenStreetMap',maxZoom:19}).addTo(map);
+    } else {
+        mapTilesLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap',maxZoom:19}).addTo(map);
+    }
+}
+loadMapTiles();
+
+// Auto day/night
+function autoDayNight(){
+    const h=new Date().getHours();
+    const shouldBeNight=h<7||h>=20;
+    if(shouldBeNight!==isNightMode) toggleDayNight();
+}
+setInterval(autoDayNight,60000);
 
 // ===== USER ARROW =====
 function createArrowIcon(bearing){
@@ -515,39 +682,76 @@ const speedCameras=[
     {lat:50.7500,lng:17.1000,limit:140,name:"A4 Opole"},
 ];
 
+// Route cameras - filtered at route start
+let routeCameras=[];
+function loadRouteCameras(){
+    if(!destination||!userPos)return;
+    routeCameras=speedCameras.filter(cam=>{
+        const d=haversine(userPos.lat,userPos.lng,cam.lat,cam.lng);
+        return d<50; // cameras within 50km of route
+    });
+}
+
+let currentSpeedLimit=0;
+let lastSpeedWarnSpoken=0;
+
 function checkSpeedCameras(lat,lng,speed){
     let minDist=Infinity,nearestCam=null;
-    for(const cam of speedCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(d<minDist){minDist=d;nearestCam=cam}}
+    for(const cam of routeCameras){
+        const d=haversine(lat,lng,cam.lat,cam.lng);
+        if(d<minDist){minDist=d;nearestCam=cam}
+    }
     const alert=document.getElementById('cameraAlert');
-    const sp=document.getElementById('speedPanel');
-    const sl=document.getElementById('speedLimit');
-    const sc=document.getElementById('speedCurrent');
+    const scRing=document.getElementById('scRing');
+    const scLimit=document.getElementById('scLimit');
     nearestCameraDistance=minDist;
-    if(minDist<2){
+
+    if(nearestCam&&minDist<2){
+        currentSpeedLimit=nearestCam.limit;
         document.getElementById('camDistText').textContent=fmtDist(minDist);
         document.getElementById('camSpeedText').textContent=`Ograniczenie: ${nearestCam.limit} km/h — ${nearestCam.name}`;
-        sl.textContent=nearestCam.limit;
-        sp.classList.add('show');
-        sc.textContent=Math.round(speed)+' km/h';
-        sc.classList.toggle('over',speed>nearestCam.limit);
-        if(minDist<0.5){
+        scLimit.textContent=nearestCam.limit;
+        scLimit.style.display='flex';
+
+        if(minDist<=0.5&&minDist>0.03){
             alert.classList.add('show');
             const camKey=nearestCam.name+Math.round(minDist*10);
             if(camKey!==lastCameraSpoken){lastCameraSpoken=camKey;speak(`Uwaga, fotoradar, ${nearestCam.limit} km/h, za ${fmtDist(minDist)}`)}
-        } else {alert.classList.remove('show')}
-        if(speed>nearestCam.limit&&minDist<0.5){
-            document.getElementById('camSpeedText').textContent+=` ⚠ PRZEKROCZENIE: ${Math.round(speed)} km/h`;
+        } else {
+            alert.classList.remove('show');
         }
-    } else {alert.classList.remove('show');sp.classList.remove('show')}
+
+        // Speed warning
+        if(speedAlertEnabled&&speed>nearestCam.limit+speedAlertOver){
+            const now=Date.now();
+            if(now-lastSpeedWarnSpoken>8000){
+                lastSpeedWarnSpoken=now;
+                speak(`Uwaga! Przekroczono prędkość o ${Math.round(speed-nearestCam.limit)} kilometrów na godzinę!`);
+                document.getElementById('speedWarning').classList.add('show');
+                setTimeout(()=>document.getElementById('speedWarning').classList.remove('show'),3000);
+            }
+        }
+    } else {
+        alert.classList.remove('show');
+        currentSpeedLimit=0;
+        scLimit.textContent='—';
+    }
+
+    // Update speedometer ring color
+    if(currentSpeedLimit>0){
+        if(speed>currentSpeedLimit+speedAlertOver) scRing.className='sc-ring over';
+        else if(speed>currentSpeedLimit) scRing.className='sc-ring warn';
+        else scRing.className='sc-ring';
+    } else {
+        scRing.className='sc-ring';
+    }
 }
 
-// ===== ROUTE STRIP =====
+// ===== ROUTE STRIP (sidebar) =====
 function updateRouteStrip(lat,lng){
     if(!routeCoords.length||!navigationActive)return;
-    const strip=document.getElementById('routeStrip');
-    const track=document.getElementById('stripTrack');
-    const progress=document.getElementById('stripProgress');
-    strip.classList.add('show');
+    const track=document.getElementById('sbTrack');
+    const progress=document.getElementById('sbProgress');
     let totalDist=0;const cumDists=[0];
     for(let i=1;i<routeCoords.length;i++){totalDist+=haversine(routeCoords[i-1].lat,routeCoords[i-1].lng,routeCoords[i].lat,routeCoords[i].lng);cumDists.push(totalDist)}
     if(totalDist===0)return;
@@ -555,27 +759,39 @@ function updateRouteStrip(lat,lng){
     for(let i=0;i<routeCoords.length;i++){const d=haversine(lat,lng,routeCoords[i].lat,routeCoords[i].lng);if(d<minD){minD=d;closestIdx=i}}
     const doneDist=cumDists[closestIdx];
     progress.style.height=Math.min(100,(doneDist/totalDist)*100)+'%';
-    track.querySelectorAll('.strip-marker').forEach(m=>m.remove());
-    const lookAhead=10;
+
+    // Clear old markers (keep progress bar)
+    track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());
+
+    const lookAhead=5; // km
+    // Turn markers
     for(const inst of routeInstructions){
         if(inst.index<closestIdx)continue;
         const instDist=haversine(lat,lng,inst.lat,inst.lng);
         if(instDist>lookAhead)continue;
         const posPct=(instDist/lookAhead)*100;
         const topPx=(posPct/100)*track.clientHeight;
-        const marker=document.createElement('div');marker.className='strip-marker';marker.style.top=topPx+'px';
+        const marker=document.createElement('div');marker.className='sidebar-strip-marker';marker.style.top=topPx+'px';
         const dotClass=inst.text==='Dotrzyj do celu'?'finish':'turn';
-        marker.innerHTML=`<div class="label">${fmtDist(instDist)}</div><div class="dot ${dotClass}"></div>`;
+        marker.innerHTML=`<div class="dot ${dotClass}"></div>`;
         track.appendChild(marker);
     }
-    for(const cam of speedCameras){
+
+    // Camera markers
+    for(const cam of routeCameras){
         const d=haversine(lat,lng,cam.lat,cam.lng);
-        if(d>lookAhead||d>nearestCameraDistance)continue;
+        if(d>lookAhead)continue;
         const posPct=(d/lookAhead)*100;const topPx=(posPct/100)*track.clientHeight;
-        const marker=document.createElement('div');marker.className='strip-marker';marker.style.top=topPx+'px';
-        marker.innerHTML=`<div class="label">📸 ${cam.limit}</div><div class="dot camera"></div>`;
+        const marker=document.createElement('div');marker.className='sidebar-strip-marker';marker.style.top=topPx+'px';
+        marker.innerHTML=`<div class="dot camera"></div>`;
         track.appendChild(marker);
     }
+
+    // User dot at current progress
+    const userMarker2=document.createElement('div');userMarker2.className='sidebar-strip-marker';
+    userMarker2.style.top=Math.min(100,(doneDist/totalDist)*100)+'%';
+    userMarker2.innerHTML=`<div class="dot user"></div>`;
+    track.appendChild(userMarker2);
 }
 
 // ===== GPS =====
@@ -603,6 +819,10 @@ navigator.geolocation.watchPosition(pos=>{
         checkSpeedCameras(lat,lng,currentSpeed);
         updateRouteStrip(lat,lng);
     }
+    // Update speedometer
+    document.getElementById('scCurrent').textContent=Math.round(currentSpeed);
+    // Update sidebar time
+    document.getElementById('sbTime').textContent=fmtArrival(0).split(':').length?new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0'):'—:—';
     if(routeControl&&destination)routeControl.setWaypoints([userPos,destination]);
 },err=>{console.log("GPS:",err);if(!gpsCentered){gpsCentered=true;map.setView([50.06,19.94],15)}},{enableHighAccuracy:true,maximumAge:500});
 
@@ -617,12 +837,43 @@ function checkRouteProximity(lat,lng){
     let remain=0;
     for(let i=instructionIndex;i<routeInstructions.length-1;i++){remain+=haversine(routeInstructions[i].lat,routeInstructions[i].lng,routeInstructions[i+1].lat,routeInstructions[i+1].lng)}
     remain+=dist;
-    const done=totalRouteDist-remain;
     let etaMin=0,etaStr='—:—';
     if(currentSpeed>2){etaMin=(remain/currentSpeed)*60;etaStr=fmtArrival(etaMin)}
     const isLast=inst.text==='Dotrzyj do celu';
 
-    // ===== 500m PRE-NOTIFICATIONS FOR TURNS =====
+    // Top bar
+    document.getElementById('topArrow').textContent=bearingToArrow(inst.bearing||0);
+    const distParts=distStr.match(/^([\d,.]+)\s*(.*)$/)||[distStr,distStr,''];
+    document.getElementById('topDistNum').textContent=distParts[1];
+    document.getElementById('topDistUnit').textContent=distParts[2];
+    document.getElementById('topStreet').textContent=inst.text||'—';
+    document.getElementById('topBar').classList.add('show');
+
+    // Next turn hint
+    if(instructionIndex+1<routeInstructions.length){
+        const nxt=routeInstructions[instructionIndex+1];
+        const nxtDist=haversine(lat,lng,nxt.lat,nxt.lng);
+        document.getElementById('ntArrow').textContent=bearingToArrow(nxt.bearing||0);
+        document.getElementById('ntDist').textContent=fmtDist(nxtDist);
+        document.getElementById('ntText').textContent=nxt.text;
+        document.getElementById('nextTurnHint').classList.add('show');
+    } else {
+        document.getElementById('nextTurnHint').classList.remove('show');
+    }
+
+    // Bottom stats
+    document.getElementById('statDist').textContent=fmtDist(remain);
+    document.getElementById('statDur').textContent=fmtDuration(etaMin);
+    document.getElementById('speedBar').classList.add('show');
+
+    // Sidebar
+    document.getElementById('rightSidebar').classList.add('show');
+    document.getElementById('sbDist').textContent=fmtDist(remain);
+
+    // Speed cluster
+    document.getElementById('speedCluster').classList.add('show');
+
+    // 500m pre-notifications for turns
     for(let i=instructionIndex;i<routeInstructions.length;i++){
         const ri=routeInstructions[i];
         const riDist=haversine(lat,lng,ri.lat,ri.lng);
@@ -635,10 +886,10 @@ function checkRouteProximity(lat,lng){
         }
     }
 
-    // ===== 500m PRE-NOTIFICATION FOR NEAREST CAMERA =====
+    // 500m pre-notification for cameras
     if(nearestCameraDistance<=0.5&&nearestCameraDistance>0.03){
         let nearestCamObj=null;
-        for(const cam of speedCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(Math.abs(d-nearestCameraDistance)<0.001){nearestCamObj=cam;break}}
+        for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(Math.abs(d-nearestCameraDistance)<0.001){nearestCamObj=cam;break}}
         if(nearestCamObj){
             const camKey500=nearestCamObj.name;
             if(!spokenCameras500m.has(camKey500)){
@@ -648,19 +899,7 @@ function checkRouteProximity(lat,lng){
         }
     }
 
-    // Top bar
-    document.getElementById('topArrow').textContent=bearingToArrow(inst.bearing||0);
-    document.getElementById('topDist').textContent=distStr;
-    document.getElementById('topStreet').textContent=inst.text||'—';
-    document.getElementById('topBar').classList.add('show');
-    // Bottom bar
-    document.getElementById('etaTime').textContent=etaStr;
-    document.getElementById('statDist').textContent=fmtDist(remain);
-    document.getElementById('statDur').textContent=fmtDuration(etaMin);
-    document.getElementById('bottomBar').classList.add('show');
-    // Right buttons
-    document.getElementById('rightBtns').classList.add('show');
-    // Voice
+    // Voice for current instruction
     if(instructionIndex!==lastSpokenIdx){
         lastSpokenIdx=instructionIndex;
         let vt='';
@@ -680,9 +919,9 @@ function startNav(){
         if(!data.length)return alert("Nie znaleziono");
         destination=L.latLng(data[0].lat,data[0].lon);
         destinationName=data[0].display_name.split(',')[0]||q;
-        map.setView(destination,15);
+        map.setView(destination,16);
         drawRoute();
-        closeDest();
+        closeMainMenu();
         speak(`Nawigacja uruchomiona. Kieruj się do ${destinationName}`);
     });
 }
@@ -703,10 +942,13 @@ function drawRoute(){
             totalRouteDist=r.summary.totalDistance/1000;
             routeCoords=r.coordinates;
             extractInstructions(r);
+            // Load road events ONCE at route start
+            if(!roadEventsLoaded){loadRouteCameras();roadEventsLoaded=true}
         }
     });
     navigationActive=true;lastSpokenIdx=-1;instructionIndex=0;
     spoken500m=new Set();spokenCameras500m=new Set();
+    roadEventsLoaded=false;
 }
 
 // ===== EXTRACT INSTRUCTIONS =====
@@ -742,23 +984,26 @@ function extractInstructions(route){
 function stopNav(){
     destination=null;destinationName='';navigationActive=false;
     routeInstructions=[];routeCoords=[];instructionIndex=0;lastSpokenIdx=-1;
-    totalRouteDist=0;lastCameraSpoken=null;
+    totalRouteDist=0;lastCameraSpoken=null;currentSpeedLimit=0;
     if(routeControl){map.removeControl(routeControl);routeControl=null}
     rotateMap(0);
     document.getElementById('topBar').classList.remove('show');
-    document.getElementById('bottomBar').classList.remove('show');
-    document.getElementById('rightBtns').classList.remove('show');
-    document.getElementById('routeStrip').classList.remove('show');
+    document.getElementById('speedBar').classList.remove('show');
+    document.getElementById('rightSidebar').classList.remove('show');
+    document.getElementById('speedCluster').classList.remove('show');
     document.getElementById('cameraAlert').classList.remove('show');
-    document.getElementById('speedPanel').classList.remove('show');
-    document.getElementById('stripTrack').querySelectorAll('.strip-marker').forEach(m=>m.remove());
+    document.getElementById('speedWarning').classList.remove('show');
+    document.getElementById('nextTurnHint').classList.remove('show');
+    document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());
+    document.getElementById('sbProgress').style.height='0%';
     if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();
     document.getElementById('voiceToast').classList.remove('show');
     speak("Nawigacja zatrzymana");
 }
 
 // ===== INIT =====
-openDest();
+document.getElementById('dayNightToggle').classList.add('on');
+openMainMenu();
 </script>
 </body>
 </html>
