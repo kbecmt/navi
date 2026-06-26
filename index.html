@@ -53,6 +53,7 @@
     <div class="sidebar-bottom-icons">
         <button class="sidebar-icon-btn" id="btnSound" onclick="toggleVoice()" title="Dźwięk">🔊</button>
         <button class="sidebar-icon-btn" onclick="openReportPanel()" title="Zgłoś zdarzenie">⚠️</button>
+        <button class="sidebar-icon-btn" id="btn3D" onclick="toggle3DView()" title="Widok 2D/3D">3D</button>
         <button class="sidebar-icon-btn" onclick="openMainMenu()" title="Menu">☰</button>
     </div>
 </div>
@@ -213,6 +214,28 @@
             <div class="rp-label">Roboty drogowe</div>
         </div>
     </div>
+</div>
+
+<!-- ===== TRIP SUMMARY PANEL ===== -->
+<div id="tripSummaryPanel">
+    <div class="ts-header">
+        <h2>Podsumowanie podróży</h2>
+    </div>
+    <div class="ts-body">
+        <div class="ts-stat">
+            <div class="ts-label">Dystans</div>
+            <div class="ts-value" id="tsDistance">—</div>
+        </div>
+        <div class="ts-stat">
+            <div class="ts-label">Czas</div>
+            <div class="ts-value" id="tsDuration">—</div>
+        </div>
+        <div class="ts-stat">
+            <div class="ts-label">Śr. prędkość</div>
+            <div class="ts-value" id="tsAvgSpeed">—</div>
+        </div>
+    </div>
+    <button class="ts-close" onclick="closeTripSummary()">Zakończ</button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

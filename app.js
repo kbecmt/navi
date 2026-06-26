@@ -46,10 +46,12 @@ const appState = {
     speedLimits: [],
     routeWeather: [],
     userIncidents: [],
+    tripStartTime: 0,
+    maxSpeed: 0,
     lastTrafficCheck: 0,
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, is3DView: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -63,7 +65,15 @@ function bearingName(b){const n=['na północ','na północny wschód','na wsch�
 const arrowChars=['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
 function bearingToArrow(b){return arrowChars[Math.round(b/45)%8]}
 let displayedBearing=0;
-function rotateMap(deg){let diff=deg-displayedBearing;if(diff>180)diff-=360;if(diff<-180)diff+=360;displayedBearing+=diff*0.25;if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;document.getElementById('map').style.transform='rotate('+(-displayedBearing)+'deg)'}
+function rotateMap(deg){
+    let diff=deg-displayedBearing;if(diff>180)diff-=360;if(diff<-180)diff+=360;displayedBearing+=diff*0.25;if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;
+    let transformStyle = `rotate(${-displayedBearing}deg)`;
+    if (settings.is3DView) {
+        document.getElementById('map').style.transform = `perspective(1200px) rotateX(60deg) ${transformStyle} scale(1.15)`;
+    } else {
+        document.getElementById('map').style.transform = `${transformStyle} scale(1)`;
+    }
+}
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;document.getElementById('voiceToggle').classList.toggle('on',settings.voiceEnabled);const sb=document.getElementById('btnSound');if(sb)sb.textContent=settings.voiceEnabled?'🔊':'🔇';saveSettings()}
 function speak(text){if(!settings.voiceEnabled||!text)return;if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.05;u.volume=1;const t=document.getElementById('voiceToast');t.textContent=text;t.classList.add('show');u.onend=u.onerror=()=>t.classList.remove('show');window.speechSynthesis.speak(u)}
 let speechUnlocked=false;function unlockSpeech(){if(speechUnlocked)return;speechUnlocked=true;try{const u=new SpeechSynthesisUtterance('');u.volume=0;u.rate=0.01;window.speechSynthesis.speak(u);window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}}
@@ -100,6 +110,20 @@ function toggleTraffic() {
     updateTrafficLayerStyle();
 }
 function toggleMapTiles(){settings.mapTilesEnabled=!settings.mapTilesEnabled;document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);if(settings.mapTilesEnabled)loadMapTiles();else{if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}document.getElementById('map').style.background=settings.isNightMode?'#111118':'#d8d8e0'}saveSettings()}
+
+function toggle3DView() {
+    settings.is3DView = !settings.is3DView;
+    document.getElementById('map').classList.toggle('view-3d', settings.is3DView);
+    document.getElementById('btn3D').textContent = settings.is3DView ? '2D' : '3D';
+    // Re-apply current rotation with new 3D perspective
+    if (settings.is3DView) {
+        document.getElementById('map').style.transform = `perspective(1345px) rotateX(60deg) rotate(${-displayedBearing}deg) scale(10)`;
+    } else {
+        document.getElementById('map').style.transform = `rotate(${-displayedBearing}deg) scale(1)`;
+    }
+    saveSettings();
+}
+
 function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);loadMapTiles();if(settings.trafficEnabled){updateTrafficLayerStyle()}if(!settings.mapTilesEnabled)document.getElementById('map').style.background=settings.isNightMode?'#111118':'#d8d8e0';saveSettings()}
 function autoDayNight(){const h=new Date().getHours();const shouldBeNight=h<CONFIG.autoNightEnd||h>=CONFIG.autoNightStart;if(shouldBeNight!==settings.isNightMode)toggleDayNight()}
 setInterval(autoDayNight,60000);
@@ -506,8 +530,8 @@ function checkRouteProximity(lat, lng) {
     const isLast = inst.text === 'Dotrzyj do celu';
 
     if (isLast && dist < CONFIG.cameraNearRange) {
-        speak("Dotarłeś do celu: " + appState.destinationName);
-        stopNav();
+        speak("Dotarłeś do celu: " + (appState.destinationName || 'cel'));
+        showTripSummary();
         return;
     }
     const distStr = fmtDist(dist);
@@ -978,6 +1002,10 @@ function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
         loadRouteCameras();
     });
 
+    appState.tripStartTime = Date.now();
+    appState.maxSpeed = 0;
+
+
     appState.navigationActive = true;
     if (!appState.isRerouting) { // Don't repeat "Navigation started" on reroute
         speak('Nawigacja uruchomiona. Kieruj się do ' + appState.destinationName);
@@ -991,7 +1019,31 @@ function cancelRouteChoice() {
     openMainMenu();
 }
 
-function stopNav(){Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set()});routeCameras=[];appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")}
+function showTripSummary() {
+    const durationMs = Date.now() - appState.tripStartTime;
+    const durationMin = durationMs / 60000;
+    const distanceKm = appState.totalRouteDist;
+    const avgSpeed = distanceKm > 0 && durationMin > 0 ? (distanceKm / (durationMin / 60)).toFixed(0) : 0;
+
+    document.getElementById('tsDistance').textContent = `${distanceKm.toFixed(1)} km`;
+    document.getElementById('tsDuration').textContent = fmtDuration(durationMin);
+    document.getElementById('tsAvgSpeed').textContent = `${avgSpeed} km/h`;
+
+    document.getElementById('tripSummaryPanel').classList.add('show');
+    document.getElementById('overlay').classList.add('show');
+}
+
+function closeTripSummary() {
+    document.getElementById('tripSummaryPanel').classList.remove('show');
+    document.getElementById('overlay').classList.remove('show');
+    stopNav();
+}
+
+function stopNav(){
+    // Reset only navigation-related state, keep persistent user data like incidents
+    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,maxSpeed:0});
+    routeCameras=[];appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
+}
 
 let favorites = [];
 function loadFavorites() { try { favorites = JSON.parse(localStorage.getItem('naviFavorites')) || []; } catch (e) { favorites = []; } renderFavorites(); }
@@ -1155,6 +1207,8 @@ function initApp() {
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
     document.getElementById('searchHistorySection').classList.toggle('collapsed', settings.searchHistoryCollapsed);
+    document.getElementById('map').classList.toggle('view-3d', settings.is3DView);
+    document.getElementById('btn3D').textContent = settings.is3DView ? '2D' : '3D';
     if(settings.trafficEnabled)toggleTraffic();
 
     const savedRouteRaw = localStorage.getItem('naviLastRoute');

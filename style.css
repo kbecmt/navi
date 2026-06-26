@@ -47,7 +47,8 @@ body.day-mode {
     height: 100%;
     z-index: 1;
     background: var(--background-dark);
-    transition: background 0.3s;
+    transform-origin: center 75%; /* Pivot point for 3D rotation */
+    transition: transform 1s ease-in-out, background 0.3s;
 }
 body.day-mode #map { background: #d8d8e0; }
 
@@ -701,6 +702,62 @@ body.day-mode .route-type { border-color: var(--border); }
 }
 .rt-icon { font-size: 24px; }
 .rt-label { font-size: 14px; margin-top: 5px; }
+
+/* ===== TRIP SUMMARY PANEL ===== */
+#tripSummaryPanel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--card-dark);
+    z-index: 1005;
+    border-radius: 20px 20px 0 0;
+    padding: 15px 15px calc(15px + env(safe-area-inset-bottom));
+    transform: translateY(100%);
+    transition: transform 0.3s ease-out;
+    display: none;
+}
+#tripSummaryPanel.show {
+    display: block;
+    transform: translateY(0);
+}
+body.day-mode #tripSummaryPanel {
+    background: var(--card);
+}
+.ts-header {
+    text-align: center;
+    margin-bottom: 25px;
+}
+.ts-header h2 {
+    margin: 0;
+    font-size: 20px;
+}
+.ts-body {
+    display: flex;
+    justify-content: space-around;
+    text-align: center;
+    margin-bottom: 30px;
+}
+.ts-label {
+    font-size: 14px;
+    opacity: 0.7;
+    margin-bottom: 5px;
+}
+.ts-value {
+    font-size: 22px;
+    font-weight: 600;
+}
+.ts-close {
+    width: 100%;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--primary);
+    color: white;
+}
 
 .avoid-item {
     display: flex;
