@@ -1,6 +1,6 @@
-const APP_CACHE_NAME='navi-app-v1';
+const APP_CACHE_NAME='navi-app-v2';
 const TILES_CACHE_NAME='navi-tiles-v1';
-const ASSETS=['index.html','style.css','app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js'];
+const ASSETS=['index.html','style.css','navi-core.js','app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js'];
 
 self.addEventListener('install',e=>e.waitUntil(caches.open(APP_CACHE_NAME).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(n=>n!==APP_CACHE_NAME && n !== TILES_CACHE_NAME).map(n=>caches.delete(n)))).then(()=>self.clients.claim())));
@@ -29,6 +29,21 @@ self.addEventListener('message', event => {
                 });
                 return Promise.all(cachePromises);
             })
+        );
+    }
+    if (event.data.action === 'cache-info') {
+        const { requestId } = event.data;
+        event.waitUntil(
+            caches.open(TILES_CACHE_NAME)
+                .then(cache => cache.keys())
+                .then(keys => event.source.postMessage({ action: 'cache-info', requestId, tileCount: keys.length }))
+        );
+    }
+    if (event.data.action === 'clear-tiles') {
+        const { requestId } = event.data;
+        event.waitUntil(
+            caches.delete(TILES_CACHE_NAME)
+                .then(() => event.source.postMessage({ action: 'tiles-cleared', requestId }))
         );
     }
 });

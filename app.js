@@ -6,8 +6,9 @@ const CONFIG={
     weatherApiKey: '', // <-- Wklej tutaj swój klucz OpenWeatherMap API
     elevationApiUrl: 'https://api.open-elevation.com/api/v1/lookup',
     hereTrafficUrl: 'https://data.traffic.hereapi.com/v7/incidents',
-    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:10000,timeout:9000},gpsIntervalMs:10000,mapPanMs:1800,debounceMs:400,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
+    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:10000,timeout:9000},gpsIntervalMs:10000,mapPanMs:1800,debounceMs:400,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
 };
+const core = window.NaviCore;
 const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -54,6 +55,7 @@ const appState = {
     lastTrafficCheck: 0,
     offlineNavigation: false,
     lastOffRouteWarn: 0,
+    gpsQuality: { accuracy: null, lastFix: 0, ignored: false },
 };
 
 let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, is3DView: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
@@ -62,7 +64,7 @@ function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSetting
 loadSettings();
 function calcBearing(lat1, lon1, lat2, lon2) { const dLon = (lon2 - lon1) * Math.PI / 180; const lat1Rad = lat1 * Math.PI / 180; const lat2Rad = lat2 * Math.PI / 180; const y = Math.sin(dLon) * Math.cos(lat2Rad); const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon); return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360; }
 function calcSpeed(lat1, lon1, time1, lat2, lon2, time2) { const dist = haversine(lat1, lon1, lat2, lon2); const dt = (time2 - time1) / 1000; return dt < 0.5 ? 0 : dist / dt * 3600; }
-function haversine(lat1, lon1, lat2, lon2) { const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180; const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(a)); }
+function haversine(lat1, lon1, lat2, lon2) { return core.haversine(lat1, lon1, lat2, lon2); }
 function fmtDist(km){return km<1?Math.round(km*1000)+' m':km.toFixed(1)+' km'}
 function fmtArrival(min){const d=new Date(Date.now()+min*60000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 function fmtDuration(min){const h=Math.floor(min/60);const m=Math.round(min%60);return h>0?h+'h '+m+'min':m+' min'}
@@ -282,6 +284,12 @@ function reportIncident(type) {
     closeReportPanel();
     speak("Dziękujemy za zgłoszenie.");
 }
+function deleteUserIncident(timestamp){
+    appState.userIncidents=appState.userIncidents.filter(incident=>incident.timestamp!==timestamp);
+    saveUserIncidents();
+    renderPOIMarkers();
+    openUserIncidentsPanel();
+}
 
 function openOfflineMaps() {
     document.getElementById('mainMenu').classList.remove('open');
@@ -290,8 +298,12 @@ function openOfflineMaps() {
     document.getElementById('ssTitle').textContent = 'Mapy offline';
 
     const section = createDOMElement('div', { className: 'ss-section' });
+    section.append(createDOMElement('h4', { textContent: 'Dane lokalne' }));
+    const stats = createDOMElement('div', { className: 'offline-stats', id: 'offlineStats', textContent: 'Sprawdzanie danych...' });
     const downloadBtn = createDOMElement('button', { className: 'search-go', textContent: 'Pobierz widoczny obszar mapy' });
     downloadBtn.onclick = () => downloadOfflineArea();
+    const clearBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Wyczyść cache kafelków' });
+    clearBtn.onclick = () => clearTileCache();
     
     const progressContainer = createDOMElement('div', { id: 'offlineProgressContainer', style: 'margin-top: 15px; display: none;' });
     progressContainer.innerHTML = `
@@ -301,9 +313,50 @@ function openOfflineMaps() {
         </div>
     `;
 
-    section.append(downloadBtn, progressContainer);
+    section.append(stats, downloadBtn, clearBtn, progressContainer);
     ssBody.append(section);
     document.getElementById('settingsSub').classList.add('open');
+    refreshOfflineStats();
+}
+
+function refreshOfflineStats(){
+    loadExternalData().then(()=>{
+        const el=document.getElementById('offlineStats');
+        if(!el)return;
+        const cameraCount=(window.speedCameras||[]).length;
+        const poiCount=(window.fallbackPOIs||[]).length;
+        const incidentCount=appState.userIncidents.length;
+        el.innerHTML=`<div>Fotoradary: <b>${cameraCount}</b></div><div>POI: <b>${poiCount}</b></div><div>Moje zgłoszenia: <b>${incidentCount}</b></div><div id="tileCacheInfo">Cache kafelków: sprawdzanie...</div>`;
+        requestTileCacheInfo();
+    });
+}
+
+function requestTileCacheInfo(){
+    if(!navigator.serviceWorker||!navigator.serviceWorker.controller){const el=document.getElementById('tileCacheInfo');if(el)el.textContent='Cache kafelków: service worker nieaktywny';return}
+    const requestId='cache-info-'+Date.now();
+    const handler=(event)=>{
+        if(event.data.action==='cache-info'&&event.data.requestId===requestId){
+            const el=document.getElementById('tileCacheInfo');
+            if(el)el.innerHTML=`Cache kafelków: <b>${event.data.tileCount}</b>`;
+            navigator.serviceWorker.removeEventListener('message',handler);
+        }
+    };
+    navigator.serviceWorker.addEventListener('message',handler);
+    navigator.serviceWorker.controller.postMessage({action:'cache-info',requestId});
+}
+
+function clearTileCache(){
+    if(!navigator.serviceWorker||!navigator.serviceWorker.controller)return alert('Service Worker nie jest aktywny.');
+    if(!confirm('Wyczyścić pobrane kafelki map offline?'))return;
+    const requestId='clear-tiles-'+Date.now();
+    const handler=(event)=>{
+        if(event.data.action==='tiles-cleared'&&event.data.requestId===requestId){
+            navigator.serviceWorker.removeEventListener('message',handler);
+            refreshOfflineStats();
+        }
+    };
+    navigator.serviceWorker.addEventListener('message',handler);
+    navigator.serviceWorker.controller.postMessage({action:'clear-tiles',requestId});
 }
 
 async function downloadOfflineArea() {
@@ -408,33 +461,13 @@ function showLoading(msg){let el=document.getElementById('loadingOverlay');if(!e
 function hideLoading(){const el=document.getElementById('loadingOverlay');if(el)el.style.display='none'}
 let speedCameras=[];
 let routeCameras=[];
-function distToRoute(lat,lng){if(!appState.routeCoords.length)return Infinity;let minD=Infinity;for(let i=0;i<appState.routeCoords.length-1;i+=3){const d=haversine(lat,lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);if(d<minD)minD=d;if(minD<0.1)return minD}return minD}
-function snapToRoute(lat,lng){if(!appState.routeCoords.length)return{lat,lng};let minD=Infinity,snap=appState.routeCoords[0];for(let i=0;i<appState.routeCoords.length-1;i++){const p=appState.routeCoords[i],q=appState.routeCoords[i+1];const dx=q.lng-p.lng,dy=q.lat-p.lat;const len2=dx*dx+dy*dy;if(len2===0){const d=haversine(lat,lng,p.lat,p.lng);if(d<minD){minD=d;snap=p}continue}let t=((lng-p.lng)*dx+(lat-p.lat)*dy)/len2;t=Math.max(0,Math.min(1,t));const snapLat=p.lat+t*dy,snapLng=p.lng+t*dx;const d=haversine(lat,lng,snapLat,snapLng);if(d<minD){minD=d;snap={lat:snapLat,lng:snapLng}}}return snap}
-function distToCoords(lat,lng,coords){if(!coords.length)return Infinity;let minD=Infinity;for(let i=0;i<coords.length-1;i+=3){const d=haversine(lat,lng,coords[i].lat,coords[i].lng);if(d<minD)minD=d;if(minD<0.1)return minD}return minD}
-function snapToCoords(lat,lng,coords){if(!coords.length)return{lat,lng};let minD=Infinity,snap=coords[0];for(let i=0;i<coords.length-1;i++){const p=coords[i],q=coords[i+1];const dx=q.lng-p.lng,dy=q.lat-p.lat;const len2=dx*dx+dy*dy;if(len2===0){const d=haversine(lat,lng,p.lat,p.lng);if(d<minD){minD=d;snap=p}continue}let t=((lng-p.lng)*dx+(lat-p.lat)*dy)/len2;t=Math.max(0,Math.min(1,t));const snapLat=p.lat+t*dy,snapLng=p.lng+t*dx;const d=haversine(lat,lng,snapLat,snapLng);if(d<minD){minD=d;snap={lat:snapLat,lng:snapLng}}}return snap}
-function rebuildRouteMetrics(){appState.routeCumulativeDists=[0];let total=0;for(let i=1;i<appState.routeCoords.length;i++){total+=haversine(appState.routeCoords[i-1].lat,appState.routeCoords[i-1].lng,appState.routeCoords[i].lat,appState.routeCoords[i].lng);appState.routeCumulativeDists.push(total)}if(total>0)appState.totalRouteDist=total}
-function nearestRouteIndex(lat,lng,startIndex=0){let minD=Infinity,best=startIndex;for(let i=Math.max(0,startIndex);i<appState.routeCoords.length;i++){const c=appState.routeCoords[i],d=haversine(lat,lng,c.lat,c.lng);if(d<minD){minD=d;best=i}}return best}
-function projectGpsToRoute(lat,lng){
-    if(!appState.routeCoords.length)return{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:{lat,lng}};
-    if(appState.routeCumulativeDists.length!==appState.routeCoords.length)rebuildRouteMetrics();
-    let minD=Infinity,closestIndex=0,bestDone=0,bestSnap=appState.routeCoords[0];
-    for(let i=0;i<appState.routeCoords.length-1;i++){
-        const p=appState.routeCoords[i],q=appState.routeCoords[i+1];
-        const dx=q.lng-p.lng,dy=q.lat-p.lat,len2=dx*dx+dy*dy;
-        let t=0;
-        if(len2>0)t=Math.max(0,Math.min(1,((lng-p.lng)*dx+(lat-p.lat)*dy)/len2));
-        const snapLat=p.lat+t*dy,snapLng=p.lng+t*dx;
-        const d=haversine(lat,lng,snapLat,snapLng);
-        if(d<minD){
-            const segmentKm=haversine(p.lat,p.lng,q.lat,q.lng);
-            minD=d;closestIndex=t>=0.5?i+1:i;bestDone=(appState.routeCumulativeDists[i]||0)+(segmentKm*t);bestSnap={lat:snapLat,lng:snapLng};
-        }
-    }
-    const total=appState.totalRouteDist||appState.routeCumulativeDists[appState.routeCumulativeDists.length-1]||0;
-    const doneKm=Math.max(0,Math.min(bestDone,total));
-    const remainingKm=Math.max(0,total-doneKm);
-    return{percent:total?Math.min(100,(doneKm/total)*100):0,doneKm,remainingKm,closestIndex,distanceFromRoute:minD,snapped:bestSnap};
-}
+function distToRoute(lat,lng){return core.distToCoords(lat,lng,appState.routeCoords)}
+function snapToRoute(lat,lng){return core.projectPointToRoute(lat,lng,appState.routeCoords,appState.routeCumulativeDists).snapped}
+function distToCoords(lat,lng,coords){return core.distToCoords(lat,lng,coords)}
+function snapToCoords(lat,lng,coords){return core.projectPointToRoute(lat,lng,coords).snapped}
+function rebuildRouteMetrics(){const metrics=core.buildCumulativeDists(appState.routeCoords);appState.routeCumulativeDists=metrics.cumulative;if(metrics.total>0)appState.totalRouteDist=metrics.total}
+function nearestRouteIndex(lat,lng,startIndex=0){return core.nearestRouteIndex(lat,lng,appState.routeCoords,startIndex)}
+function projectGpsToRoute(lat,lng){if(appState.routeCumulativeDists.length!==appState.routeCoords.length)rebuildRouteMetrics();return core.projectPointToRoute(lat,lng,appState.routeCoords,appState.routeCumulativeDists)}
 function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.05;routeCameras=(window.speedCameras||[]).filter(cam=>cam.lat>=minLat-margin&&cam.lat<=maxLat+margin&&cam.lng>=minLng-margin&&cam.lng<=maxLng+margin&&distToRoute(cam.lat,cam.lng)<0.5);loadOSMPOIs(minLat,maxLat,minLng,maxLng)}
 const osmTypeMap={
     'brand_Orlen': { icon: 'OR', type: 'fuel', style: { backgroundColor: '#e11b22', color: 'white' } },
@@ -501,11 +534,7 @@ function renderRoutePreviewMarkers(route){
     clearRoutePreviewMarkers();
     if(!route||!route.geometry||!route.geometry.coordinates)return;
     const coords=route.geometry.coordinates.map(c=>({lat:c[1],lng:c[0]}));
-    const previewPois=[
-        ...(settings.poiFilters['camera']!==false?(window.speedCameras||[]).filter(p=>distToCoords(p.lat,p.lng,coords)<0.5):[]),
-        ...(window.fallbackPOIs||[]).filter(p=>settings.poiFilters[p.type]!==false&&distToCoords(p.lat,p.lng,coords)<0.5),
-        ...appState.userIncidents.filter(p=>distToCoords(p.lat,p.lng,coords)<0.5)
-    ];
+    const previewPois=getRoutePreviewPois(route);
     const renderedCoords=new Set();
     for(const poi of previewPois){
         const coordKey=`${poi.lat.toFixed(4)},${poi.lng.toFixed(4)}`;
@@ -517,16 +546,66 @@ function renderRoutePreviewMarkers(route){
         renderedCoords.add(coordKey);
     }
 }
+function getRoutePreviewPois(route){
+    if(!route||!route.geometry||!route.geometry.coordinates)return[];
+    const coords=route.geometry.coordinates.map(c=>({lat:c[1],lng:c[0]}));
+    return [
+        ...(settings.poiFilters['camera']!==false?(window.speedCameras||[]).filter(p=>distToCoords(p.lat,p.lng,coords)<0.5):[]),
+        ...(window.fallbackPOIs||[]).filter(p=>settings.poiFilters[p.type]!==false&&distToCoords(p.lat,p.lng,coords)<0.5),
+        ...appState.userIncidents.filter(p=>distToCoords(p.lat,p.lng,coords)<0.5)
+    ];
+}
+function formatPoiSummary(summary){
+    if(!summary.total)return'Brak punktów na trasie';
+    const parts=[];
+    if(summary.camera)parts.push('📸 '+summary.camera);
+    if(summary.fuel)parts.push('⛽ '+summary.fuel);
+    if(summary.parking)parts.push('🅿 '+summary.parking);
+    if(summary.restaurant||summary.cafe)parts.push('🍽 '+((summary.restaurant||0)+(summary.cafe||0)));
+    const rest=summary.total-parts.reduce((sum,part)=>sum+(parseInt(part.replace(/\D/g,''),10)||0),0);
+    if(rest>0)parts.push('• '+rest);
+    return parts.join('   ');
+}
+function renderRouteChoiceSummaries(routes){
+    routes.forEach((route,index)=>{
+        const el=document.getElementById('rcPoiSummary-'+index);
+        if(!el)return;
+        el.textContent=formatPoiSummary(core.summarizePois(getRoutePreviewPois(route)));
+    });
+}
 function checkSpeedCameras(lat,lng,speed){let minDist=Infinity,nearestCam=null;for(const cam of routeCameras){const d=haversine(lat,lng,cam.lat,cam.lng);if(d<minDist){minDist=d;nearestCam=cam}}const alert=document.getElementById('cameraAlert'),scRing=document.getElementById('scRing'),scLimit=document.getElementById('scLimit');appState.nearestCameraDistance=minDist;if(nearestCam&&minDist<CONFIG.cameraShowRange){appState.currentSpeedLimit=nearestCam.limit;document.getElementById('camDistText').textContent=fmtDist(minDist);document.getElementById('camSpeedText').textContent='Ograniczenie: '+nearestCam.limit+' km/h — '+nearestCam.name;scLimit.textContent=nearestCam.limit;scLimit.style.display='flex';if(minDist<=CONFIG.cameraAlertRange&&minDist>CONFIG.cameraNearRange){alert.classList.add('show');const camKey=nearestCam.name+Math.round(minDist*10);if(camKey!==appState.lastCameraSpoken){appState.lastCameraSpoken=camKey;speak('Uwaga, fotoradar, '+nearestCam.limit+' km/h, za '+fmtDist(minDist))}}else alert.classList.remove('show');if(settings.speedAlertEnabled&&speed>nearestCam.limit+settings.speedAlertOver){const now=Date.now();if(now-appState.lastSpeedWarnSpoken>CONFIG.speedWarnCooldown){appState.lastSpeedWarnSpoken=now;speak('Uwaga! Przekroczono prędkość o '+Math.round(speed-nearestCam.limit)+' kilometrów na godzinę!');document.getElementById('speedWarning').classList.add('show');setTimeout(()=>document.getElementById('speedWarning').classList.remove('show'),3000)}}}else{alert.classList.remove('show');appState.currentSpeedLimit=0;scLimit.textContent='—'}if(appState.currentSpeedLimit>0){if(speed>appState.currentSpeedLimit+settings.speedAlertOver)scRing.className='sc-ring over';else if(speed>appState.currentSpeedLimit)scRing.className='sc-ring warn';else scRing.className='sc-ring'}else scRing.className='sc-ring'}
 function appendRouteStripMarker(track, distanceKm, lookAheadKm, className, content){if(distanceKm<0||distanceKm>lookAheadKm)return;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=(distanceKm/lookAheadKm)*track.clientHeight+'px';m.innerHTML='<div class="icon-dot '+className+'">'+content+'</div>';track.appendChild(m)}
 function routeDistanceAhead(item, routeProgress){const p=projectGpsToRoute(item.lat,item.lng);if(p.closestIndex<routeProgress.closestIndex)return Infinity;return p.doneKm-routeProgress.doneKm}
 function updateRouteStrip(){if(!appState.routeCoords.length||!appState.navigationActive)return;const track=document.getElementById('sbTrack'),progress=document.getElementById('sbProgress'),routeProgress=appState.routeProgress;const closestIdx=routeProgress.closestIndex||0;progress.style.height=routeProgress.percent+'%';track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());const lookAhead=5;for(const inst of appState.routeInstructions){if(inst.text==='Dotrzyj do celu'||inst.index<closestIdx)continue;const instDist=Math.max(0,(appState.routeCumulativeDists[inst.index]||0)-routeProgress.doneKm);appendRouteStripMarker(track,instDist,lookAhead,'turn',bearingToArrow(inst.bearing||0))}if(settings.poiFilters['camera']!==false){for(const cam of routeCameras){appendRouteStripMarker(track,routeDistanceAhead(cam,routeProgress),lookAhead,'camera','📸')}}for(const poi of appState.routePOIs){if(settings.poiFilters[poi.type]===false)continue;appendRouteStripMarker(track,routeDistanceAhead(poi,routeProgress),lookAhead,poi.type,poi.icon||'•')}for(const incident of appState.userIncidents){appendRouteStripMarker(track,routeDistanceAhead(incident,routeProgress),lookAhead,incident.type||'danger',incident.icon||'⚠️')}}
 function smoothSetView(pos){const now=Date.now();if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;appState.lastMapViewTime=now;appState.lastMapViewPos=pos;map.panTo(pos,{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})}
-function processGpsPosition(pos){const lat=pos.coords.latitude,lng=pos.coords.longitude,heading=pos.coords.heading,now=Date.now();appState.userPos=L.latLng(lat,lng);if(appState.lastLat!==null&&appState.lastLng!==null&&appState.lastTime!==null){const dt=(now-appState.lastTime)/1000;if(dt>0.3){const b=calcBearing(appState.lastLat,appState.lastLng,lat,lng);const s=calcSpeed(appState.lastLat,appState.lastLng,appState.lastTime,lat,lng,now);appState.currentSpeed=s;if(s>1.5)appState.currentBearing=b;appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}}else{appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}if(heading&&!isNaN(heading)&&heading!==0)appState.currentBearing=heading;if(appState.navigationActive)appState.routeProgress=projectGpsToRoute(lat,lng);const displayPos=appState.navigationActive?appState.routeProgress.snapped:appState.userPos;if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}if(!appState.gpsCentered){appState.gpsCentered=true;map.setView(displayPos,CONFIG.defaultZoom)}if(appState.navigationActive){smoothSetView(displayPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')}
+function isGpsFixUsable(lat,lng,accuracy,now){
+    if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
+    if(appState.lastLat===null||appState.lastLng===null||appState.lastTime===null)return true;
+    const dt=Math.max(0.001,(now-appState.lastTime)/1000);
+    const jumpSpeed=haversine(appState.lastLat,appState.lastLng,lat,lng)/dt*3600;
+    return jumpSpeed<=CONFIG.gpsJumpSpeedKmh||accuracy<=25;
+}
+function updateGpsQuality(accuracy,ignored){appState.gpsQuality={accuracy:accuracy||null,lastFix:Date.now(),ignored:!!ignored};const limit=document.getElementById('scLimit');if(!appState.currentSpeedLimit&&limit){limit.textContent=ignored?'GPS?':accuracy?Math.round(accuracy)+'m':'—'}}
+function processGpsPosition(pos){
+    const lat=pos.coords.latitude,lng=pos.coords.longitude,heading=pos.coords.heading,accuracy=pos.coords.accuracy,now=Date.now();
+    if(!isGpsFixUsable(lat,lng,accuracy,now)){updateGpsQuality(accuracy,true);return}
+    updateGpsQuality(accuracy,false);
+    appState.userPos=L.latLng(lat,lng);
+    if(appState.lastLat!==null&&appState.lastLng!==null&&appState.lastTime!==null){const dt=(now-appState.lastTime)/1000;if(dt>0.3){const b=calcBearing(appState.lastLat,appState.lastLng,lat,lng);const s=calcSpeed(appState.lastLat,appState.lastLng,appState.lastTime,lat,lng,now);appState.currentSpeed=s;if(s>1.5)appState.currentBearing=b;appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}}else{appState.lastLat=lat;appState.lastLng=lng;appState.lastTime=now}
+    if(heading&&!isNaN(heading)&&heading!==0)appState.currentBearing=heading;
+    if(appState.navigationActive)appState.routeProgress=projectGpsToRoute(lat,lng);
+    const displayPos=appState.navigationActive?appState.routeProgress.snapped:appState.userPos;
+    if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
+    if(!appState.gpsCentered){appState.gpsCentered=true;map.setView(displayPos,CONFIG.defaultZoom)}
+    if(appState.navigationActive){smoothSetView(displayPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
+    document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
+    document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
+}
 function handleGpsError(err){console.log("GPS:",err);if(!appState.gpsCentered){appState.gpsCentered=true;map.setView([50.06,19.94],15)}}
 function pollGps(){navigator.geolocation.getCurrentPosition(processGpsPosition,handleGpsError,CONFIG.gpsOptions)}
 pollGps();
 setInterval(pollGps,CONFIG.gpsIntervalMs);
+function advanceInstructionIndex(progress){while(appState.instructionIndex<appState.routeInstructions.length-1){const inst=appState.routeInstructions[appState.instructionIndex];const instDone=appState.routeCumulativeDists[inst.index]||0;if(progress.doneKm>instDone+CONFIG.passedManeuverKm||inst.index<progress.closestIndex)appState.instructionIndex++;else break}}
 function checkRouteProximity(lat, lng) {
     if (!appState.navigationActive || appState.isRerouting) return;
 
@@ -543,7 +622,7 @@ function checkRouteProximity(lat, lng) {
     }
 
     if (!appState.routeInstructions.length) return;
-    while(appState.instructionIndex<appState.routeInstructions.length-1&&appState.routeInstructions[appState.instructionIndex].index<progress.closestIndex)appState.instructionIndex++;
+    advanceInstructionIndex(progress);
     const inst = appState.routeInstructions[appState.instructionIndex];
     if (!inst) return;
 
@@ -578,6 +657,7 @@ function checkRouteProximity(lat, lng) {
     } else {
         roadBadge.style.display = 'none';
     }
+    renderLaneGuidance(inst.lanes);
 
     document.getElementById('topBar').classList.add('show');
     if (appState.instructionIndex + 1 < appState.routeInstructions.length) {
@@ -866,16 +946,17 @@ function displayRouteChoices(routes) {
 
         const card = createDOMElement('div', { className: 'rc-card', onclick: () => selectRoute(index) });
         if (index === 0) card.classList.add('active');
+        card.onmouseenter=()=>{document.querySelectorAll('.rc-card').forEach(c=>c.classList.remove('active'));card.classList.add('active');appState.alternativeRouteLines.forEach((l,i)=>l.setStyle({color:i===index?'#2979ff':'#8a8a8a',weight:i===index?7:5,opacity:i===index?0.9:0.7}));renderRoutePreviewMarkers(route)};
         
         const duration = fmtDuration(route.duration / 60);
         const distance = fmtDist(route.distance / 1000);
-        card.innerHTML = `<div class="rc-info"><div class="rc-duration">${duration}</div><div class="rc-distance">${distance}</div></div>${CONFIG.routeChoiceOnlineExtras ? `<div class="rc-elevation-chart" id="elevation-chart-${index}"></div>` : ''}`;
+        card.innerHTML = `<div class="rc-info"><div class="rc-duration">${duration}</div><div class="rc-distance">${distance}</div></div><div class="rc-poi-summary" id="rcPoiSummary-${index}">Ładowanie punktów...</div>${CONFIG.routeChoiceOnlineExtras ? `<div class="rc-elevation-chart" id="elevation-chart-${index}"></div>` : ''}`;
         choiceList.appendChild(card);
         if (CONFIG.routeChoiceOnlineExtras) fetchElevationProfile(route, index);
     });
 
     if (CONFIG.routeChoiceOnlineExtras) fetchWeather(appState.destination.lat, appState.destination.lng);
-    loadExternalData().then(()=>{if(document.getElementById('routeChoicePanel').classList.contains('show')&&appState.alternativeRoutes===routes)renderRoutePreviewMarkers(routes[0])});
+    loadExternalData().then(()=>{if(document.getElementById('routeChoicePanel').classList.contains('show')&&appState.alternativeRoutes===routes){renderRoutePreviewMarkers(routes[0]);renderRouteChoiceSummaries(routes)}});
     map.fitBounds(appState.alternativeRouteLines[0].getBounds(), { padding: [50, 50] });
     document.getElementById('routeChoicePanel').classList.add('show');
 }
