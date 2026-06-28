@@ -87,10 +87,16 @@ function isCarModeActive(){return settings.carMode||isCarModeForced()}
 function applyCarMode(){const active=isCarModeActive();document.body.classList.toggle('car-mode',active);const toggle=document.getElementById('carModeToggle');if(toggle)toggle.classList.toggle('on',active)}
 function toggleCarMode(){settings.carMode=!settings.carMode;applyCarMode();saveSettings();if(settings.carMode)speak('Tryb samochodowy włączony')}
 function syncVoiceButtons(){const label=settings.voiceEnabled?'🔊':'🔇';const sb=document.getElementById('btnSound');const mb=document.getElementById('mobileBtnSound');if(sb)sb.textContent=label;if(mb)mb.textContent=label;const toggle=document.getElementById('voiceToggle');if(toggle)toggle.classList.toggle('on',settings.voiceEnabled)}
-function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings()}
-function speak(text){if(!settings.voiceEnabled||!text)return;if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.05;u.volume=1;const t=document.getElementById('voiceToast');t.textContent=text;t.classList.add('show');u.onend=u.onerror=()=>t.classList.remove('show');window.speechSynthesis.speak(u)}
-let speechUnlocked=false;function unlockSpeech(){if(speechUnlocked)return;speechUnlocked=true;try{const u=new SpeechSynthesisUtterance('');u.volume=0;u.rate=0.01;window.speechSynthesis.speak(u);window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}}
-document.addEventListener('touchstart',unlockSpeech,{once:true});document.addEventListener('click',unlockSpeech,{once:true});
+let speechUnlocked=false,availableVoices=[];
+function refreshVoices(){try{availableVoices=window.speechSynthesis?window.speechSynthesis.getVoices():[]}catch(e){availableVoices=[]}}
+function getPolishVoice(){refreshVoices();return availableVoices.find(v=>/^pl([-_]|$)/i.test(v.lang))||availableVoices.find(v=>/polski|polish/i.test(v.name))||null}
+function unlockSpeech(){if(speechUnlocked)return;speechUnlocked=true;try{refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);setTimeout(()=>{try{window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}},80)}catch(e){}}
+function showVoiceToast(text){const t=document.getElementById('voiceToast');if(!t)return;t.textContent=text;t.classList.add('show');return t}
+function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Głos niedostępny w tej przeglądarce');return}try{if(window.speechSynthesis.paused)window.speechSynthesis.resume();if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.02;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=u.onerror=()=>{if(t)t.classList.remove('show')};window.speechSynthesis.speak(u)}catch(e){showVoiceToast('Nie udało się odtworzyć głosu')}}
+function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();setTimeout(()=>speak('Dźwięk włączony'),120)}}
+function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();setTimeout(()=>speak('Test dźwięku. Powiadomienia głosowe działają.'),120)}
+if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
+document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
 let mapTilesLayer=null;
 function removeOnlineMapLayers(){
