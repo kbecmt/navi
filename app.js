@@ -775,6 +775,7 @@ function smoothSetView(pos){
     if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;
     appState.lastMapViewTime=now;
     appState.lastMapViewPos=pos;
+    map.invalidateSize({pan:false});
     map.setView(pos,Math.max(map.getZoom(),CONFIG.defaultZoom),{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
 }
 function isGpsFixUsable(lat,lng,accuracy,now){
@@ -797,7 +798,7 @@ function processGpsPosition(pos){
     if(appState.navigationActive)appState.routeProgress=projectGpsToRoute(lat,lng);
     const displayPos=appState.navigationActive?appState.routeProgress.snapped:appState.userPos;
     if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
-    if(!appState.gpsCentered){appState.gpsCentered=true;map.setView(displayPos,CONFIG.defaultZoom)}
+    if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,CONFIG.defaultZoom)}
     if(appState.navigationActive){smoothSetView(displayPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
     document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
     document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
