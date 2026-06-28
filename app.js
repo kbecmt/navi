@@ -775,14 +775,7 @@ function smoothSetView(pos){
     if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;
     appState.lastMapViewTime=now;
     appState.lastMapViewPos=pos;
-    if(appState.navigationActive&&appState.routeProgress&&appState.routeCoords.length){
-        const ahead=routePointAhead(appState.routeProgress,CONFIG.mapLookAheadKm);
-        if(ahead){
-            map.fitBounds([[pos.lat,pos.lng],[ahead.lat,ahead.lng]],{paddingTopLeft:[70,120],paddingBottomRight:[110,90],animate:true,duration:CONFIG.mapPanMs/1000,maxZoom:CONFIG.defaultZoom});
-            return;
-        }
-    }
-    map.panTo(pos,{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+    map.setView(pos,Math.max(map.getZoom(),CONFIG.defaultZoom),{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
 }
 function isGpsFixUsable(lat,lng,accuracy,now){
     if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
