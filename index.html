@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Nawigacja GPS</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
@@ -111,6 +111,14 @@
 <!-- ===== PERSISTENT MENU BUTTON ===== -->
 <button id="persistentMenu" onclick="openMainMenu()" title="Menu">☰</button>
 
+<!-- ===== MOBILE NAV ACTIONS ===== -->
+<div id="mobileNavActions">
+    <button onclick="toggleVoice()" id="mobileBtnSound" title="Dźwięk">🔊</button>
+    <button onclick="openReportPanel()" title="Zgłoś zdarzenie">⚠️</button>
+    <button onclick="openGpsDiagnostics()" title="GPS">◎</button>
+    <button onclick="openMainMenu()" title="Menu">☰</button>
+</div>
+
 <!-- ===== OVERLAY ===== -->
 <div id="overlay" onclick="closeMainMenu();closeSettingsSub()"></div>
 
@@ -149,6 +157,8 @@
         <div class="mm-item" onclick="openSpeedSettings()"><span class="mm-icon">🚨</span><span class="mm-label">Alerty prędkości</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openPoiSettings()"><span class="mm-icon">🚦</span><span class="mm-label">Filtruj POI</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openRoutePointsPanel()"><span class="mm-icon">📋</span><span class="mm-label">Punkty na trasie</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openGpsDiagnostics()"><span class="mm-icon">◎</span><span class="mm-label">Diagnostyka GPS</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openTripHistoryPanel()"><span class="mm-icon">▦</span><span class="mm-label">Historia przejazdów</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="toggleSimulation();closeMainMenu()"><span class="mm-icon">▶</span><span class="mm-label" id="simulationMenuLabel">Symuluj trasę</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openUserIncidentsPanel()"><span class="mm-icon">📢</span><span class="mm-label">Moje zgłoszenia</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openOfflineMaps()"><span class="mm-icon">📥</span><span class="mm-label">Mapy offline</span><span class="mm-arrow">›</span></div>

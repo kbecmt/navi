@@ -621,6 +621,41 @@ body.day-mode .sb-close {
     transform: scale(0.96);
 }
 
+#mobileNavActions {
+    position: fixed;
+    right: calc(10px + env(safe-area-inset-right));
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    left: calc(110px + env(safe-area-inset-left));
+    z-index: 990;
+    display: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    pointer-events: none;
+}
+
+#mobileNavActions.show {
+    display: grid;
+    pointer-events: auto;
+}
+
+#mobileNavActions button {
+    min-width: 0;
+    height: 52px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    background: rgba(15, 18, 26, 0.84);
+    color: white;
+    box-shadow: var(--shadow-md);
+    font-size: 22px;
+    backdrop-filter: var(--blur-panel);
+}
+
+body.day-mode #mobileNavActions button {
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--text);
+}
+
 #overlay {
     position: fixed;
     inset: 0;
@@ -1369,6 +1404,61 @@ body.day-mode .rc-elevation-chart {
     background: rgba(23, 26, 33, 0.04);
 }
 
+.mobile-info-grid,
+.trip-history-list {
+    display: grid;
+    gap: 8px;
+}
+
+.info-row,
+.trip-history-item {
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--control-radius);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.info-row {
+    grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.4fr);
+    align-items: center;
+}
+
+.info-row span,
+.trip-history-item span {
+    color: var(--muted-dark);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.info-row b,
+.trip-history-item b {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.trip-history-item {
+    grid-template-columns: minmax(0, 1.4fr) auto auto;
+    align-items: center;
+}
+
+.trip-history-item > div {
+    display: grid;
+    gap: 2px;
+}
+
+body.day-mode .info-row,
+body.day-mode .trip-history-item {
+    border-color: var(--border);
+    background: rgba(23, 26, 33, 0.04);
+}
+
+body.day-mode .info-row span,
+body.day-mode .trip-history-item span {
+    color: var(--muted);
+}
+
 #elevationChartContainer {
     margin-top: 12px;
 }
@@ -1501,6 +1591,11 @@ body.day-mode .leaflet-control-zoom a {
 
 /* ===== RESPONSYWNOSC ===== */
 @media (min-width: 720px) {
+    #mobileNavActions,
+    #mobileNavActions.show {
+        display: none;
+    }
+
     #mainMenu,
     #settingsSub,
     #routeChoicePanel,
@@ -1553,33 +1648,75 @@ body.day-mode .leaflet-control-zoom a {
 }
 
 @media (max-width: 520px) {
+    :root {
+        --panel-radius: 16px;
+        --control-radius: 14px;
+    }
+
     #topBar {
-        padding-right: calc(15px + env(safe-area-inset-right));
+        padding: calc(8px + env(safe-area-inset-top)) calc(64px + env(safe-area-inset-right)) 8px calc(10px + env(safe-area-inset-left));
     }
 
     #nextTurnHint {
         position: static;
         max-width: 100%;
-        margin-top: 10px;
+        margin-top: 7px;
+        padding: 6px 9px;
+        font-size: 13px;
     }
 
     .turn-arrow {
-        width: 52px;
-        min-width: 52px;
-        height: 52px;
-        font-size: 34px;
+        width: 48px;
+        min-width: 48px;
+        height: 48px;
+        font-size: 32px;
     }
 
     .nav-dist {
-        font-size: 26px;
+        font-size: 25px;
     }
 
     .nav-street {
-        font-size: 17px;
+        font-size: 16px;
     }
 
     #rightSidebar {
-        width: 70px;
+        width: 56px;
+        padding: calc(82px + env(safe-area-inset-top)) 0 calc(150px + env(safe-area-inset-bottom));
+        background: linear-gradient(180deg, rgba(12, 16, 24, 0.58), rgba(12, 16, 24, 0.28));
+    }
+
+    .sidebar-time {
+        font-size: 14px;
+    }
+
+    .eta-dist {
+        max-width: 48px;
+        font-size: 12px;
+    }
+
+    .sidebar-strip {
+        margin: 10px 0;
+    }
+
+    .sidebar-strip-track {
+        width: 6px;
+    }
+
+    .sidebar-strip-marker {
+        width: 24px;
+        height: 24px;
+        font-size: 15px;
+    }
+
+    .sidebar-strip-marker .icon-dot {
+        min-width: 22px;
+        height: 22px;
+        font-size: 12px;
+    }
+
+    .sidebar-bottom-icons {
+        display: none;
     }
 
     .sidebar-icon-btn {
@@ -1590,20 +1727,147 @@ body.day-mode .leaflet-control-zoom a {
 
     #speedCluster {
         transform-origin: bottom left;
+        bottom: calc(82px + env(safe-area-inset-bottom));
+        left: calc(10px + env(safe-area-inset-left));
     }
 
     .sc-ring {
-        width: 82px;
-        height: 82px;
+        width: 78px;
+        height: 78px;
+        border-width: 4px;
     }
 
     .sc-current {
-        font-size: 32px;
+        font-size: 30px;
+    }
+
+    .sc-limit {
+        width: 38px;
+        height: 38px;
+        font-size: 17px;
+    }
+
+    #speedBar {
+        padding: 8px calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
     }
 
     .sb-row {
         gap: 8px;
         font-size: 14px;
+        min-height: 50px;
+        padding-right: 54px;
+    }
+
+    #statDist,
+    #statDur,
+    #statArrival {
+        font-size: 15px !important;
+    }
+
+    .sb-close {
+        position: absolute;
+        right: calc(10px + env(safe-area-inset-right));
+        width: 46px;
+        min-width: 46px;
+        height: 46px;
+    }
+
+    #mobileNavActions {
+        left: calc(96px + env(safe-area-inset-left));
+        right: calc(62px + env(safe-area-inset-right));
+        bottom: calc(72px + env(safe-area-inset-bottom));
+        gap: 7px;
+    }
+
+    #mobileNavActions button {
+        height: 48px;
+        border-radius: 14px;
+        font-size: 20px;
+    }
+
+    #persistentMenu {
+        right: calc(14px + env(safe-area-inset-right));
+        bottom: calc(14px + env(safe-area-inset-bottom));
+        width: 58px;
+        height: 58px;
+    }
+
+    #mainMenu,
+    #settingsSub,
+    #routeChoicePanel,
+    #reportPanel,
+    #tripSummaryPanel {
+        max-height: min(86vh, 720px);
+        padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    }
+
+    .mm-header,
+    .ss-header {
+        min-height: 46px;
+        margin-bottom: 10px;
+    }
+
+    .mm-close,
+    .ss-back,
+    .rc-close,
+    .rp-close {
+        width: 46px;
+        height: 46px;
+    }
+
+    #dest {
+        min-height: 52px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+    }
+
+    .search-go,
+    .add-fav-btn,
+    .ts-close {
+        min-height: 52px;
+        padding: 14px;
+    }
+
+    .mm-item,
+    .mm-toggle-row,
+    .avoid-item,
+    .ss-row {
+        min-height: 56px;
+    }
+
+    .route-types {
+        gap: 8px;
+    }
+
+    .route-type {
+        padding: 12px 4px;
+    }
+
+    .route-point-item,
+    .fav-item {
+        min-height: 52px;
+    }
+
+    .rc-card {
+        padding: 13px;
+    }
+
+    .rp-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .rp-item {
+        min-height: 96px;
+        padding: 14px 8px;
+    }
+
+    .trip-history-item {
+        grid-template-columns: 1fr;
+    }
+
+    .info-row {
+        grid-template-columns: 1fr;
     }
 
     .ss-val {
