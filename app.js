@@ -6,7 +6,7 @@ const CONFIG={
     weatherApiKey: '', // <-- Wklej tutaj swój klucz OpenWeatherMap API
     elevationApiUrl: 'https://api.open-elevation.com/api/v1/lookup',
     hereTrafficUrl: 'https://data.traffic.hereapi.com/v7/incidents',
-    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:10000,timeout:9000},gpsIntervalMs:10000,mapPanMs:1800,debounceMs:400,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
+    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:10000,timeout:9000},gpsIntervalMs:10000,mapPanMs:1800,mapLookAheadKm:5,debounceMs:400,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
 };
 const core = window.NaviCore;
 const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
@@ -60,7 +60,7 @@ const appState = {
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, is3DView: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -76,12 +76,7 @@ function bearingToArrow(b){return arrowChars[Math.round(b/45)%8]}
 let displayedBearing=0;
 function rotateMap(deg){
     let diff=deg-displayedBearing;if(diff>180)diff-=360;if(diff<-180)diff+=360;displayedBearing+=diff*0.25;if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;
-    let transformStyle = `rotate(${-displayedBearing}deg)`;
-    if (settings.is3DView) {
-        document.getElementById('map').style.transform = `perspective(1200px) rotateX(60deg) ${transformStyle} scale(1.15)`;
-    } else {
-        document.getElementById('map').style.transform = `${transformStyle} scale(1)`;
-    }
+    document.getElementById('map').style.transform = `rotate(${-displayedBearing}deg) scale(1)`;
 }
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;document.getElementById('voiceToggle').classList.toggle('on',settings.voiceEnabled);const sb=document.getElementById('btnSound');if(sb)sb.textContent=settings.voiceEnabled?'🔊':'🔇';saveSettings()}
 function speak(text){if(!settings.voiceEnabled||!text)return;if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.05;u.volume=1;const t=document.getElementById('voiceToast');t.textContent=text;t.classList.add('show');u.onend=u.onerror=()=>t.classList.remove('show');window.speechSynthesis.speak(u)}
@@ -134,19 +129,6 @@ function toggleTraffic() {
     updateTrafficLayerStyle();
 }
 function toggleMapTiles(){settings.mapTilesEnabled=!settings.mapTilesEnabled;document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);if(settings.mapTilesEnabled)loadMapTiles();else{if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}document.getElementById('map').style.background=settings.isNightMode?'#111318':'#dde5ef'}saveSettings()}
-
-function toggle3DView() {
-    settings.is3DView = !settings.is3DView;
-    document.getElementById('map').classList.toggle('view-3d', settings.is3DView);
-    document.getElementById('btn3D').textContent = settings.is3DView ? '2D' : '3D';
-    // Re-apply current rotation with new 3D perspective
-    if (settings.is3DView) {
-        document.getElementById('map').style.transform = `perspective(1345px) rotateX(60deg) rotate(${-displayedBearing}deg) scale(10)`;
-    } else {
-        document.getElementById('map').style.transform = `rotate(${-displayedBearing}deg) scale(1)`;
-    }
-    saveSettings();
-}
 
 function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);loadMapTiles();if(settings.trafficEnabled){updateTrafficLayerStyle()}if(!settings.mapTilesEnabled||appState.offlineNavigation)document.getElementById('map').style.background=settings.isNightMode?'#111318':'#dde5ef';saveSettings()}
 function autoDayNight(){const h=new Date().getHours();const shouldBeNight=h<CONFIG.autoNightEnd||h>=CONFIG.autoNightStart;if(shouldBeNight!==settings.isNightMode)toggleDayNight()}
@@ -681,7 +663,22 @@ function checkSpeedCameras(lat,lng,speed){let minDist=Infinity,nearestCam=null;f
 function appendRouteStripMarker(track, distanceKm, lookAheadKm, className, content){if(distanceKm<0||distanceKm>lookAheadKm)return;const m=document.createElement('div');m.className='sidebar-strip-marker';m.style.top=(distanceKm/lookAheadKm)*track.clientHeight+'px';m.innerHTML='<div class="icon-dot '+className+'">'+content+'</div>';track.appendChild(m)}
 function routeDistanceAhead(item, routeProgress){const p=projectGpsToRoute(item.lat,item.lng);if(p.closestIndex<routeProgress.closestIndex)return Infinity;return p.doneKm-routeProgress.doneKm}
 function updateRouteStrip(){if(!appState.routeCoords.length||!appState.navigationActive)return;const track=document.getElementById('sbTrack'),progress=document.getElementById('sbProgress'),routeProgress=appState.routeProgress;const closestIdx=routeProgress.closestIndex||0;progress.style.height=routeProgress.percent+'%';track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());const lookAhead=5;for(const inst of appState.routeInstructions){if(inst.text==='Dotrzyj do celu'||inst.index<closestIdx)continue;const instDist=Math.max(0,(appState.routeCumulativeDists[inst.index]||0)-routeProgress.doneKm);appendRouteStripMarker(track,instDist,lookAhead,'turn',bearingToArrow(inst.bearing||0))}if(settings.poiFilters['camera']!==false){for(const cam of routeCameras){appendRouteStripMarker(track,routeDistanceAhead(cam,routeProgress),lookAhead,'camera','📸')}}for(const poi of appState.routePOIs){if(settings.poiFilters[poi.type]===false)continue;appendRouteStripMarker(track,routeDistanceAhead(poi,routeProgress),lookAhead,poi.type,poi.icon||'•')}for(const incident of appState.userIncidents){appendRouteStripMarker(track,routeDistanceAhead(incident,routeProgress),lookAhead,incident.type||'danger',incident.icon||'⚠️')}}
-function smoothSetView(pos){const now=Date.now();if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;appState.lastMapViewTime=now;appState.lastMapViewPos=pos;map.panTo(pos,{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})}
+function routePointAhead(progress, kmAhead){const target=(progress.doneKm||0)+kmAhead;return pointAtRouteDistance(target)}
+function smoothSetView(pos){
+    const now=Date.now();
+    if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;
+    if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;
+    appState.lastMapViewTime=now;
+    appState.lastMapViewPos=pos;
+    if(appState.navigationActive&&appState.routeProgress&&appState.routeCoords.length){
+        const ahead=routePointAhead(appState.routeProgress,CONFIG.mapLookAheadKm);
+        if(ahead){
+            map.fitBounds([[pos.lat,pos.lng],[ahead.lat,ahead.lng]],{paddingTopLeft:[70,120],paddingBottomRight:[110,90],animate:true,duration:CONFIG.mapPanMs/1000,maxZoom:CONFIG.defaultZoom});
+            return;
+        }
+    }
+    map.panTo(pos,{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+}
 function isGpsFixUsable(lat,lng,accuracy,now){
     if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
     if(appState.lastLat===null||appState.lastLng===null||appState.lastTime===null)return true;
@@ -1405,8 +1402,6 @@ function initApp() {
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
     document.getElementById('searchHistorySection').classList.toggle('collapsed', settings.searchHistoryCollapsed);
-    document.getElementById('map').classList.toggle('view-3d', settings.is3DView);
-    document.getElementById('btn3D').textContent = settings.is3DView ? '2D' : '3D';
     if(settings.trafficEnabled)updateTrafficLayerStyle();
 
     const savedRouteRaw = localStorage.getItem('naviLastRoute');
