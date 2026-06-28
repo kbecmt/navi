@@ -1,4 +1,4 @@
-const APP_CACHE_NAME='navi-app-v2';
+const APP_CACHE_NAME='navi-app-v3';
 const TILES_CACHE_NAME='navi-tiles-v1';
 const ASSETS=['index.html','style.css','navi-core.js','app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js'];
 
@@ -7,7 +7,7 @@ self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.al
 
 self.addEventListener('message', event => {
     if (event.data.action === 'cache-tiles') {
-        const { urls, regionName } = event.data;
+        const { urls, regionName, meta } = event.data;
         event.waitUntil(
             caches.open(TILES_CACHE_NAME).then(cache => {
                 // We need to fetch and cache one by one to report progress
@@ -27,7 +27,7 @@ self.addEventListener('message', event => {
                         event.source.postMessage({ action: 'cache-progress', regionName, progress: (completed / total) * 100 });
                     });
                 });
-                return Promise.all(cachePromises);
+                return Promise.all(cachePromises).then(()=>caches.open(APP_CACHE_NAME).then(appCache=>appCache.put('offline-region-'+regionName,new Response(JSON.stringify({regionName,meta,tileCount:urls.length,date:new Date().toISOString()}),{headers:{'Content-Type':'application/json'}}))));
             })
         );
     }

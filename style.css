@@ -117,16 +117,16 @@ body.day-mode #map {
 }
 
 .turn-arrow {
-    width: 58px;
-    min-width: 58px;
-    height: 58px;
+    width: 66px;
+    min-width: 66px;
+    height: 66px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(255, 255, 255, 0.16);
     color: white;
-    font-size: 40px;
+    font-size: 46px;
     font-weight: 800;
 }
 
@@ -139,7 +139,7 @@ body.day-mode #map {
 
 .nav-dist {
     color: white;
-    font-size: 29px;
+    font-size: 34px;
     font-weight: 800;
     letter-spacing: 0;
 }
@@ -154,7 +154,7 @@ body.day-mode #map {
 .nav-street {
     overflow: hidden;
     color: rgba(255, 255, 255, 0.94);
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -472,8 +472,14 @@ body.day-mode #speedBar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 46px;
+    min-height: 54px;
     gap: 12px;
+}
+
+#statDist,
+#statDur,
+#statArrival {
+    font-size: 18px !important;
 }
 
 .sb-close {
@@ -1283,6 +1289,79 @@ body.day-mode .rc-poi-summary {
 
 body.day-mode .offline-stats {
     background: rgba(23, 26, 33, 0.04);
+    color: var(--muted);
+}
+
+.offline-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.offline-regions {
+    display: grid;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.day-mode .offline-regions {
+    border-top-color: var(--border);
+}
+
+.hidden-file-input {
+    display: none;
+}
+
+.route-point-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.route-point-item {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--control-radius);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+body.day-mode .route-point-item {
+    border-color: var(--border);
+    background: rgba(23, 26, 33, 0.04);
+}
+
+.route-point-icon {
+    text-align: center;
+    font-size: 18px;
+}
+
+.route-point-name {
+    overflow: hidden;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.route-point-dist,
+.route-point-empty {
+    color: var(--muted-dark);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+body.day-mode .route-point-dist,
+body.day-mode .route-point-empty {
     color: var(--muted);
 }
 
