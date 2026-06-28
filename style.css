@@ -1211,6 +1211,21 @@ body.day-mode .ss-row {
     accent-color: var(--primary);
 }
 
+.camera-range {
+    width: 100%;
+    accent-color: var(--primary);
+}
+
+.setting-hint {
+    color: var(--muted-dark);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+body.day-mode .setting-hint {
+    color: var(--muted);
+}
+
 #speedAlertVal {
     min-width: 70px;
     text-align: right;
@@ -1639,6 +1654,28 @@ body.day-mode .leaflet-control-zoom a {
 
 .user-arrow {
     filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.38));
+}
+
+#centerUserMarker {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 1001;
+    display: none;
+    width: 42px;
+    height: 42px;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+#centerUserMarker.show {
+    display: block;
+}
+
+.center-user-arrow {
+    width: 42px;
+    height: 42px;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.42));
 }
 
 .poi-brand-icon {

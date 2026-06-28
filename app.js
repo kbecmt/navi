@@ -61,7 +61,7 @@ const appState = {
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', cameraZoom: 16, speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -70,6 +70,7 @@ function calcSpeed(lat1, lon1, time1, lat2, lon2, time2) { const dist = haversin
 function haversine(lat1, lon1, lat2, lon2) { return core.haversine(lat1, lon1, lat2, lon2); }
 function fmtDist(km){return km<1?Math.round(km*1000)+' m':km.toFixed(1)+' km'}
 function fmtMeters(m){return m<1000?m+' m':(m/1000).toFixed(m%1000?1:0)+' km'}
+function cameraZoom(){return Math.max(13,Math.min(18,parseInt(settings.cameraZoom,10)||CONFIG.defaultZoom))}
 function turnNotifyKm(){return (settings.turnNotifyDistanceM||500)/1000}
 function cameraNotifyKm(){return (settings.cameraNotifyDistanceM||500)/1000}
 function fmtArrival(min){const d=new Date(Date.now()+min*60000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
@@ -86,17 +87,21 @@ function isCarModeForced(){const p=new URLSearchParams(location.search);return p
 function isCarModeActive(){return settings.carMode||isCarModeForced()}
 function applyCarMode(){const active=isCarModeActive();document.body.classList.toggle('car-mode',active);const toggle=document.getElementById('carModeToggle');if(toggle)toggle.classList.toggle('on',active)}
 function toggleCarMode(){settings.carMode=!settings.carMode;applyCarMode();saveSettings();if(settings.carMode)speak('Tryb samochodowy włączony')}
+function ensureCenterUserMarker(){let el=document.getElementById('centerUserMarker');if(!el){el=document.createElement('div');el.id='centerUserMarker';el.innerHTML='<svg class="center-user-arrow" viewBox="0 0 42 42"><circle cx="21" cy="21" r="17" fill="#2979ff" stroke="white" stroke-width="3.5" opacity="0.96"/><polygon points="21,6 28,31 21,25 14,31" fill="white"/></svg>';document.body.appendChild(el)}return el}
+function updateCenterUserMarker(show){const el=ensureCenterUserMarker();el.classList.toggle('show',!!show)}
 function syncVoiceButtons(){const label=settings.voiceEnabled?'🔊':'🔇';const sb=document.getElementById('btnSound');const mb=document.getElementById('mobileBtnSound');if(sb)sb.textContent=label;if(mb)mb.textContent=label;const toggle=document.getElementById('voiceToggle');if(toggle)toggle.classList.toggle('on',settings.voiceEnabled)}
-let speechUnlocked=false,availableVoices=[];
+let speechUnlocked=false,availableVoices=[],audioCtx=null;
 function refreshVoices(){try{availableVoices=window.speechSynthesis?window.speechSynthesis.getVoices():[]}catch(e){availableVoices=[]}}
 function getPolishVoice(){refreshVoices();return availableVoices.find(v=>/^pl([-_]|$)/i.test(v.lang))||availableVoices.find(v=>/polski|polish/i.test(v.name))||null}
-function unlockSpeech(){if(speechUnlocked)return;speechUnlocked=true;try{refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);setTimeout(()=>{try{window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}},80)}catch(e){}}
+function unlockAudio(){try{const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;if(!audioCtx)audioCtx=new Ctx();if(audioCtx.state==='suspended')audioCtx.resume()}catch(e){}}
+function playBeep(freq=880,duration=0.14){try{unlockAudio();if(!audioCtx)return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='sine';osc.frequency.value=freq;gain.gain.setValueAtTime(0.001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.18,audioCtx.currentTime+0.02);gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+duration);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+duration+0.03)}catch(e){}}
+function unlockSpeech(){if(speechUnlocked)return;speechUnlocked=true;try{unlockAudio();refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);setTimeout(()=>{try{window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}},80)}catch(e){}}
 function showVoiceToast(text){const t=document.getElementById('voiceToast');if(!t)return;t.textContent=text;t.classList.add('show');return t}
-function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Głos niedostępny w tej przeglądarce');return}try{if(window.speechSynthesis.paused)window.speechSynthesis.resume();if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.02;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=u.onerror=()=>{if(t)t.classList.remove('show')};window.speechSynthesis.speak(u)}catch(e){showVoiceToast('Nie udało się odtworzyć głosu')}}
-function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();setTimeout(()=>speak('Dźwięk włączony'),120)}}
-function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();setTimeout(()=>speak('Test dźwięku. Powiadomienia głosowe działają.'),120)}
+function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();playBeep();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Głos niedostępny w tej przeglądarce');return}try{if(window.speechSynthesis.paused)window.speechSynthesis.resume();if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.98;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=u.onerror=()=>{if(t)t.classList.remove('show')};setTimeout(()=>window.speechSynthesis.speak(u),40)}catch(e){showVoiceToast('Nie udało się odtworzyć głosu')}}
+function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();playBeep();setTimeout(()=>speak('Dźwięk włączony'),160)}}
+function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);setTimeout(()=>playBeep(990,0.12),170);setTimeout(()=>speak('Test dźwięku. Powiadomienia głosowe działają.'),360)}
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
-document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});
+document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
 let mapTilesLayer=null;
 function removeOnlineMapLayers(){
@@ -183,6 +188,24 @@ function openSettingsSub() {
         routeTypesContainer.append(typeEl);
     });
     ssBody.append(createDOMElement('div', { className: 'ss-section', innerHTML: '<h4>Typ trasy</h4>' }), routeTypesContainer);
+
+    const cameraSection = createDOMElement('div', { className: 'ss-section' });
+    cameraSection.append(createDOMElement('h4', { textContent: 'Kamera' }));
+    const cameraRow = createDOMElement('div', { className: 'ss-row ss-row-stack' });
+    const cameraTop = createDOMElement('div', { className: 'ss-row-top' });
+    const cameraVal = createDOMElement('b', { textContent: `Zoom ${cameraZoom()}` });
+    const cameraRange = createDOMElement('input', { className: 'camera-range', attributes: { type: 'range', min: '13', max: '18', value: cameraZoom() } });
+    cameraRange.oninput = () => {
+        settings.cameraZoom = parseInt(cameraRange.value, 10);
+        cameraVal.textContent = `Zoom ${settings.cameraZoom}`;
+        saveSettings();
+        if(appState.userPos)map.setZoom(cameraZoom(),{animate:true});
+    };
+    const cameraHint = createDOMElement('div', { className: 'setting-hint', textContent: 'Niżej = bliżej auta, wyżej = większy widok trasy.' });
+    cameraTop.append(createDOMElement('span', { textContent: 'Wysokość kamery' }), cameraVal);
+    cameraRow.append(cameraTop, cameraRange, cameraHint);
+    cameraSection.append(cameraRow);
+    ssBody.append(cameraSection);
 
     const avoidItems = [
         { key: 'avoidTolls', icon: '💰', label: 'Opłaty' }, { key: 'avoidUnpaved', icon: '🛤️', label: 'Drogi nieutwardzone' },
@@ -782,7 +805,7 @@ function smoothSetView(pos){
     appState.lastMapViewTime=now;
     appState.lastMapViewPos=pos;
     map.invalidateSize({pan:false});
-    map.setView(pos,Math.max(map.getZoom(),CONFIG.defaultZoom),{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+    map.setView(pos,cameraZoom(),{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
 }
 function isGpsFixUsable(lat,lng,accuracy,now){
     if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
@@ -803,8 +826,14 @@ function processGpsPosition(pos){
     if(heading&&!isNaN(heading)&&heading!==0)appState.currentBearing=heading;
     if(appState.navigationActive)appState.routeProgress=projectGpsToRoute(lat,lng);
     const displayPos=appState.navigationActive?appState.routeProgress.snapped:appState.userPos;
-    if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
-    if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,CONFIG.defaultZoom)}
+    if(appState.navigationActive){
+        if(appState.userMarker){map.removeLayer(appState.userMarker);appState.userMarker=null}
+        updateCenterUserMarker(true);
+    }else{
+        updateCenterUserMarker(false);
+        if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
+    }
+    if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,cameraZoom())}
     if(appState.navigationActive){smoothSetView(displayPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
     document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
     document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
@@ -1362,7 +1391,7 @@ function stopNav(){
     stopSimulation(false);
     exitNavigationOfflineMode();
     Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0});
-    routeCameras=[];appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
+    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 
 let favorites = [];
