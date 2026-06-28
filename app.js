@@ -90,16 +90,18 @@ function toggleCarMode(){settings.carMode=!settings.carMode;applyCarMode();saveS
 function ensureCenterUserMarker(){let el=document.getElementById('centerUserMarker');if(!el){el=document.createElement('div');el.id='centerUserMarker';el.innerHTML='<svg class="center-user-arrow" viewBox="0 0 42 42"><circle cx="21" cy="21" r="17" fill="#2979ff" stroke="white" stroke-width="3.5" opacity="0.96"/><polygon points="21,6 28,31 21,25 14,31" fill="white"/></svg>';document.body.appendChild(el)}return el}
 function updateCenterUserMarker(show){const el=ensureCenterUserMarker();el.classList.toggle('show',!!show)}
 function syncVoiceButtons(){const label=settings.voiceEnabled?'🔊':'🔇';const sb=document.getElementById('btnSound');const mb=document.getElementById('mobileBtnSound');if(sb)sb.textContent=label;if(mb)mb.textContent=label;const toggle=document.getElementById('voiceToggle');if(toggle)toggle.classList.toggle('on',settings.voiceEnabled)}
-let speechUnlocked=false,availableVoices=[],audioCtx=null;
+let speechUnlocked=false,availableVoices=[],audioCtx=null,speechQueue=[],speechBusy=false,speechWatchdog=null;
 function refreshVoices(){try{availableVoices=window.speechSynthesis?window.speechSynthesis.getVoices():[]}catch(e){availableVoices=[]}}
 function getPolishVoice(){refreshVoices();return availableVoices.find(v=>/^pl([-_]|$)/i.test(v.lang))||availableVoices.find(v=>/polski|polish/i.test(v.name))||null}
 function unlockAudio(){try{const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;if(!audioCtx)audioCtx=new Ctx();if(audioCtx.state==='suspended')audioCtx.resume()}catch(e){}}
 function playBeep(freq=880,duration=0.14){try{unlockAudio();if(!audioCtx)return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='sine';osc.frequency.value=freq;gain.gain.setValueAtTime(0.001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.18,audioCtx.currentTime+0.02);gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+duration);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+duration+0.03)}catch(e){}}
 function unlockSpeech(){if(speechUnlocked)return;try{unlockAudio();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window))return;refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);speechUnlocked=true}catch(e){}}
 function showVoiceToast(text){const t=document.getElementById('voiceToast');if(!t)return;t.textContent=text;t.classList.add('show');return t}
-function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();playBeep();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Głos niedostępny w tej przeglądarce');return}try{refreshVoices();window.speechSynthesis.resume();if(window.speechSynthesis.speaking||window.speechSynthesis.pending)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.98;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=u.onerror=()=>{if(t)t.classList.remove('show')};window.speechSynthesis.speak(u)}catch(e){showVoiceToast('Nie udało się odtworzyć głosu')}}
-function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();speak('Dźwięk włączony')}}
-function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);speak('Test dźwięku. Powiadomienia głosowe działają.')}
+function finishSpeech(t){speechBusy=false;if(t)t.classList.remove('show');clearTimeout(speechWatchdog);speechWatchdog=null;processSpeechQueue()}
+function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Lektor niedostępny w Chrome');return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.resume();speechBusy=true;const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=()=>finishSpeech(t);u.onerror=()=>finishSpeech(t);window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>finishSpeech(t),Math.max(3500,text.length*95))}catch(e){speechBusy=false;showVoiceToast('Nie udało się uruchomić lektora')}}
+function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();playBeep();speechQueue=[text];processSpeechQueue()}
+function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();speak('Lektor włączony')}}
+function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);speechQueue=[];speechBusy=false;if(window.speechSynthesis)window.speechSynthesis.cancel();speak('Lektor Chrome włączony. Powiadomienia głosowe działają.')}
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
 document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
@@ -976,6 +978,7 @@ function checkRouteProximity(lat, lng) {
     }
 }
 function startNav() {
+    if(settings.voiceEnabled)unlockSpeech();
     const q = document.getElementById('dest').value;
     if (!q) return alert("Wpisz cel podróży");
     if (!appState.userPos) return alert("Oczekiwanie na GPS…");
