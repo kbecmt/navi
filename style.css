@@ -1217,6 +1217,62 @@ body.day-mode .ss-row {
     font-weight: 800;
 }
 
+.ss-row-stack {
+    display: grid;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.ss-row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.distance-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 8px;
+}
+
+.distance-chip,
+.test-voice-btn {
+    min-height: 42px;
+    border: 1px solid var(--border-dark);
+    border-radius: var(--control-radius);
+    background: rgba(255, 255, 255, 0.07);
+    color: inherit;
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.distance-chip.active {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: white;
+}
+
+.test-voice-btn {
+    justify-self: start;
+    padding: 0 14px;
+    color: var(--muted-dark);
+}
+
+body.day-mode .distance-chip,
+body.day-mode .test-voice-btn {
+    border-color: var(--border);
+    background: rgba(23, 26, 33, 0.04);
+}
+
+body.day-mode .distance-chip.active {
+    color: var(--primary-strong);
+}
+
+body.day-mode .test-voice-btn {
+    color: var(--muted);
+}
+
 /* ===== ROUTE CHOICE PANEL ===== */
 .rc-header,
 .rp-header {

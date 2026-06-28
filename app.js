@@ -61,7 +61,7 @@ const appState = {
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -69,6 +69,9 @@ function calcBearing(lat1, lon1, lat2, lon2) { const dLon = (lon2 - lon1) * Math
 function calcSpeed(lat1, lon1, time1, lat2, lon2, time2) { const dist = haversine(lat1, lon1, lat2, lon2); const dt = (time2 - time1) / 1000; return dt < 0.5 ? 0 : dist / dt * 3600; }
 function haversine(lat1, lon1, lat2, lon2) { return core.haversine(lat1, lon1, lat2, lon2); }
 function fmtDist(km){return km<1?Math.round(km*1000)+' m':km.toFixed(1)+' km'}
+function fmtMeters(m){return m<1000?m+' m':(m/1000).toFixed(m%1000?1:0)+' km'}
+function turnNotifyKm(){return (settings.turnNotifyDistanceM||500)/1000}
+function cameraNotifyKm(){return (settings.cameraNotifyDistanceM||500)/1000}
 function fmtArrival(min){const d=new Date(Date.now()+min*60000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 function fmtDuration(min){const h=Math.floor(min/60);const m=Math.round(min%60);return h>0?h+'h '+m+'min':m+' min'}
 function bearingName(b){const n=['na północ','na północny wschód','na wschód','na południowy wschód','na południe','na południowy zachód','na zachód','na północny zachód'];return n[Math.round(b/45)%8]}
@@ -487,7 +490,7 @@ function openSpeedSettings() {
     document.getElementById('mainMenu').classList.remove('open');
     const ssBody = document.getElementById('ssBody');
     ssBody.innerHTML = '';
-    document.getElementById('ssTitle').textContent = 'Alerty prędkości';
+    document.getElementById('ssTitle').textContent = 'Powiadomienia';
 
     const section = createDOMElement('div', { className: 'ss-section' });
     section.append(createDOMElement('h4', { textContent: 'Powiadomienia o przekroczeniu prędkości' }));
@@ -505,7 +508,37 @@ function openSpeedSettings() {
     row2.append(createDOMElement('label', { textContent: 'Próg przekroczenia' }), valDiv);
 
     section.append(row1, row2);
-    ssBody.append(section);
+
+    const distanceSection = createDOMElement('div', { className: 'ss-section' });
+    distanceSection.append(createDOMElement('h4', { textContent: 'Odległości komunikatów' }));
+    const distanceOptions=[200,300,500,800,1000,1500,2000];
+    const makeDistanceRow=(label,key,testText)=>{
+        const row=createDOMElement('div',{className:'ss-row ss-row-stack'});
+        const top=createDOMElement('div',{className:'ss-row-top'});
+        const value=createDOMElement('b',{textContent:fmtMeters(settings[key]||500)});
+        const chips=createDOMElement('div',{className:'distance-chips'});
+        distanceOptions.forEach(m=>{
+            const chip=createDOMElement('button',{className:`distance-chip ${(settings[key]||500)===m?'active':''}`,textContent:fmtMeters(m)});
+            chip.onclick=()=>{
+                settings[key]=m;
+                saveSettings();
+                value.textContent=fmtMeters(m);
+                chips.querySelectorAll('.distance-chip').forEach(c=>c.classList.remove('active'));
+                chip.classList.add('active');
+            };
+            chips.append(chip);
+        });
+        const testBtn=createDOMElement('button',{className:'test-voice-btn',textContent:'Test głosu',onclick:()=>speak(testText(settings[key]||500))});
+        top.append(createDOMElement('span',{textContent:label}),value);
+        row.append(top,chips,testBtn);
+        return row;
+    };
+    distanceSection.append(
+        makeDistanceRow('Przypomnienie o skręcie','turnNotifyDistanceM',m=>'Za '+fmtMeters(m)+', skręć w prawo.'),
+        makeDistanceRow('Ostrzeżenie o fotoradarze','cameraNotifyDistanceM',m=>'Uwaga, za '+fmtMeters(m)+' fotoradar.')
+    );
+
+    ssBody.append(section,distanceSection);
     document.getElementById('settingsSub').classList.add('open');
 }
 
@@ -888,19 +921,22 @@ function checkRouteProximity(lat, lng) {
     document.getElementById('mobileNavActions').classList.add('show');
     document.getElementById('sbDist').textContent = fmtDist(remain);
     document.getElementById('speedCluster').classList.add('show');
+    const turnNotifyRange=turnNotifyKm(),cameraNotifyRange=cameraNotifyKm();
     for (let i = appState.instructionIndex; i < appState.routeInstructions.length; i++) {
         const ri = appState.routeInstructions[i], riDist = Math.max(0,(appState.routeCumulativeDists[ri.index]||progress.doneKm)-progress.doneKm);
-        if (riDist <= CONFIG.preNotifyRange && riDist > CONFIG.cameraNearRange && i !== appState.instructionIndex && !appState.spoken500m.has(i)) {
+        const isCurrentReminder=i===appState.instructionIndex;
+        if(isCurrentReminder&&appState.lastSpokenIdx!==i)continue;
+        if (riDist <= turnNotifyRange && riDist > CONFIG.cameraNearRange && !appState.spoken500m.has(i)) {
             appState.spoken500m.add(i);
-            speak(ri.text === 'Dotrzyj do celu' ? 'Za 500 metrów dotrzesz do celu: ' + (appState.destinationName || 'cel') : 'Za 500 metrów, ' + ri.text);
+            speak(ri.text === 'Dotrzyj do celu' ? 'Za '+fmtMeters(settings.turnNotifyDistanceM||500)+' dotrzesz do celu: ' + (appState.destinationName || 'cel') : 'Za '+fmtMeters(settings.turnNotifyDistanceM||500)+', ' + ri.text);
         }
     }
-    if (appState.nearestCameraDistance <= CONFIG.preNotifyRange && appState.nearestCameraDistance > CONFIG.cameraNearRange) {
+    if (appState.nearestCameraDistance <= cameraNotifyRange && appState.nearestCameraDistance > CONFIG.cameraNearRange) {
         for (const cam of routeCameras) {
             const d = haversine(lat, lng, cam.lat, cam.lng);
             if (Math.abs(d - appState.nearestCameraDistance) < 0.001 && !appState.spokenCameras500m.has(cam.name)) {
                 appState.spokenCameras500m.add(cam.name);
-                speak('Uwaga, za 500 metrów fotoradar, ' + cam.limit + ' kilometrów na godzinę');
+                speak('Uwaga, za '+fmtMeters(settings.cameraNotifyDistanceM||500)+' fotoradar, ' + cam.limit + ' kilometrów na godzinę');
                 break;
             }
         }
