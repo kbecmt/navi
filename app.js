@@ -98,13 +98,14 @@ function playBeep(freq=880,duration=0.14){try{unlockAudio();if(!audioCtx)return;
 function unlockSpeech(){if(speechUnlocked)return;try{unlockAudio();if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window))return;refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);speechUnlocked=true}catch(e){}}
 function showVoiceToast(text){const t=document.getElementById('voiceToast');if(!t)return;t.textContent=text;t.classList.add('show');return t}
 function finishSpeech(t){speechBusy=false;if(t)t.classList.remove('show');clearTimeout(speechWatchdog);speechWatchdog=null;processSpeechQueue()}
-function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){showVoiceToast('Lektor niedostępny w Chrome');return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.resume();speechBusy=true;const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=()=>finishSpeech(t);u.onerror=()=>finishSpeech(t);window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>finishSpeech(t),Math.max(3500,text.length*95))}catch(e){speechBusy=false;showVoiceToast('Nie udało się uruchomić lektora')}}
-function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();playBeep();speechQueue=[text];processSpeechQueue()}
+function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){speechQueue=[];showVoiceToast('Lektor niedostępny w Chrome');return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.resume();speechBusy=true;const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=()=>finishSpeech(t);u.onerror=()=>finishSpeech(t);window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>finishSpeech(t),Math.max(3500,text.length*95))}catch(e){speechBusy=false;speechQueue=[];showVoiceToast('Nie udało się uruchomić lektora')}}
+function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();haptic();playBeep();speechQueue=[text];processSpeechQueue()}
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();speak('Lektor włączony')}}
 function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);speechQueue=[];speechBusy=false;if(window.speechSynthesis)window.speechSynthesis.cancel();speak('Lektor Chrome włączony. Powiadomienia głosowe działają.')}
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
 document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
+window.addEventListener('resize',debounce(()=>{map.invalidateSize({pan:false});if(appState.navigationActive&&appState.routeProgress.snapped)map.setView(appState.routeProgress.snapped,cameraZoom(),{animate:false})},250));
 let mapTilesLayer=null;
 function removeOnlineMapLayers(){
     if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}
@@ -162,14 +163,16 @@ function closeMainMenu(){document.getElementById('mainMenu').classList.remove('o
 function createDOMElement(tag, options = {}) {
     const el = document.createElement(tag);
     if (options.className) el.className = options.className;
-    if (options.textContent) el.textContent = options.textContent;
-    if (options.innerHTML) el.innerHTML = options.innerHTML;
+    if (options.textContent !== undefined) el.textContent = options.textContent;
+    if (options.innerHTML !== undefined) el.innerHTML = options.innerHTML;
     if (options.onclick) el.onclick = options.onclick;
     for (const attr in options.attributes) {
         el.setAttribute(attr, options.attributes[attr]);
     }
     return el;
 }
+
+function haptic(pattern=35){try{if(navigator.vibrate)navigator.vibrate(pattern)}catch(e){}}
 
 function readStoredJson(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
 function writeStoredJson(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(e){console.error("Failed to store JSON:",e);return false}}
@@ -769,7 +772,11 @@ function openGpsDiagnostics(){
         ['Postęp trasy',appState.navigationActive?Math.round(appState.routeProgress.percent||0)+'%':'poza nawigacją']
     ];
     const section=createDOMElement('div',{className:'ss-section mobile-info-grid'});
-    rows.forEach(([label,value])=>section.append(createDOMElement('div',{className:'info-row',innerHTML:`<span>${label}</span><b>${value}</b>`})));
+    rows.forEach(([label,value])=>{
+        const row=createDOMElement('div',{className:'info-row'});
+        row.append(createDOMElement('span',{textContent:label}),createDOMElement('b',{textContent:value}));
+        section.append(row);
+    });
     ssBody.append(section);
     document.getElementById('settingsSub').classList.add('open');
 }
@@ -785,7 +792,15 @@ function openTripHistoryPanel(){
     if(!history.length)section.innerHTML='<div class="fav-empty">Brak zapisanych przejazdów.</div>';
     history.forEach(trip=>{
         const when=new Date(trip.timestamp).toLocaleString('pl-PL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        section.append(createDOMElement('div',{className:'trip-history-item',innerHTML:`<div><b>${trip.destination||'Cel'}</b><span>${when}</span></div><div><b>${trip.distance}</b><span>${trip.duration}</span></div><div><b>${trip.avgSpeed}</b><span>śr.</span></div>`}));
+        const item=createDOMElement('div',{className:'trip-history-item'});
+        const dest=createDOMElement('div');
+        dest.append(createDOMElement('b',{textContent:trip.destination||'Cel'}),createDOMElement('span',{textContent:when}));
+        const dist=createDOMElement('div');
+        dist.append(createDOMElement('b',{textContent:trip.distance||'—'}),createDOMElement('span',{textContent:trip.duration||'—'}));
+        const avg=createDOMElement('div');
+        avg.append(createDOMElement('b',{textContent:trip.avgSpeed||'—'}),createDOMElement('span',{textContent:'śr.'}));
+        item.append(dest,dist,avg);
+        section.append(item);
     });
     ssBody.append(section);
     document.getElementById('settingsSub').classList.add('open');
@@ -1394,7 +1409,7 @@ function stopNav(){
     stopSimulation(false);
     exitNavigationOfflineMode();
     Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0});
-    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
+    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 
 let favorites = [];
