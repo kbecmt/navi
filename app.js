@@ -61,7 +61,7 @@ const appState = {
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
 };
 
-let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', speedAlertOver: 10, speedAlertEnabled: true, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -79,6 +79,10 @@ function rotateMap(deg){
     let diff=deg-displayedBearing;if(diff>180)diff-=360;if(diff<-180)diff+=360;displayedBearing+=diff*0.25;if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;
     document.getElementById('map').style.transform = `rotate(${-displayedBearing}deg) scale(1)`;
 }
+function isCarModeForced(){const p=new URLSearchParams(location.search);return p.get('car')==='1'||p.get('androidAuto')==='1'||p.get('aa')==='1'}
+function isCarModeActive(){return settings.carMode||isCarModeForced()}
+function applyCarMode(){const active=isCarModeActive();document.body.classList.toggle('car-mode',active);const toggle=document.getElementById('carModeToggle');if(toggle)toggle.classList.toggle('on',active)}
+function toggleCarMode(){settings.carMode=!settings.carMode;applyCarMode();saveSettings();if(settings.carMode)speak('Tryb samochodowy włączony')}
 function syncVoiceButtons(){const label=settings.voiceEnabled?'🔊':'🔇';const sb=document.getElementById('btnSound');const mb=document.getElementById('mobileBtnSound');if(sb)sb.textContent=label;if(mb)mb.textContent=label;const toggle=document.getElementById('voiceToggle');if(toggle)toggle.classList.toggle('on',settings.voiceEnabled)}
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings()}
 function speak(text){if(!settings.voiceEnabled||!text)return;if(window.speechSynthesis.speaking)window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=1.05;u.volume=1;const t=document.getElementById('voiceToast');t.textContent=text;t.classList.add('show');u.onend=u.onerror=()=>t.classList.remove('show');window.speechSynthesis.speak(u)}
@@ -1487,6 +1491,7 @@ function resumeLastRoute(savedRoute) {
 function initApp() {
     if(!settings.isNightMode)document.body.classList.add('day-mode');
     document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);
+    applyCarMode();
     syncVoiceButtons();
     document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);

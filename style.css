@@ -1589,10 +1589,188 @@ body.day-mode .leaflet-control-zoom a {
     filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.28));
 }
 
+/* ===== TRYB SAMOCHODOWY / ANDROID AUTO-LIKE ===== */
+body.car-mode {
+    font-size: 18px;
+}
+
+body.car-mode #topBar {
+    padding: calc(14px + env(safe-area-inset-top)) calc(112px + env(safe-area-inset-right)) 14px calc(18px + env(safe-area-inset-left));
+}
+
+body.car-mode .turn-arrow {
+    width: 78px;
+    min-width: 78px;
+    height: 78px;
+    font-size: 52px;
+}
+
+body.car-mode .nav-dist {
+    font-size: 42px;
+}
+
+body.car-mode .nav-dist-unit {
+    font-size: 22px;
+}
+
+body.car-mode .nav-street {
+    font-size: 25px;
+}
+
+body.car-mode #nextTurnHint {
+    max-width: min(42vw, 360px);
+    padding: 10px 14px;
+    font-size: 17px;
+}
+
+body.car-mode #rightSidebar {
+    width: 96px;
+    padding-top: calc(112px + env(safe-area-inset-top));
+}
+
+body.car-mode .sidebar-time {
+    font-size: 22px;
+}
+
+body.car-mode .eta-dist {
+    max-width: 84px;
+    font-size: 16px;
+}
+
+body.car-mode .sidebar-strip-track {
+    width: 10px;
+}
+
+body.car-mode .sidebar-strip-marker {
+    width: 34px;
+    height: 34px;
+}
+
+body.car-mode .sidebar-strip-marker .icon-dot {
+    min-width: 30px;
+    height: 30px;
+    font-size: 16px;
+}
+
+body.car-mode .sidebar-icon-btn {
+    width: 58px;
+    height: 58px;
+    font-size: 25px;
+}
+
+body.car-mode #speedCluster {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+}
+
+body.car-mode .sc-ring {
+    width: 108px;
+    height: 108px;
+}
+
+body.car-mode .sc-current {
+    font-size: 42px;
+}
+
+body.car-mode .sc-limit {
+    width: 50px;
+    height: 50px;
+}
+
+body.car-mode #mobileNavActions.show {
+    display: grid;
+}
+
+body.car-mode #mobileNavActions {
+    left: calc(132px + env(safe-area-inset-left));
+    right: calc(110px + env(safe-area-inset-right));
+    bottom: calc(88px + env(safe-area-inset-bottom));
+}
+
+body.car-mode #mobileNavActions button {
+    height: 60px;
+    border-radius: 18px;
+    font-size: 26px;
+}
+
+body.car-mode .sb-row {
+    min-height: 66px;
+}
+
+body.car-mode #statDist,
+body.car-mode #statDur,
+body.car-mode #statArrival {
+    font-size: 22px !important;
+}
+
+body.car-mode #mainMenu,
+body.car-mode #settingsSub,
+body.car-mode #routeChoicePanel,
+body.car-mode #reportPanel,
+body.car-mode #tripSummaryPanel {
+    max-height: min(88vh, 760px);
+}
+
+body.car-mode .mm-item,
+body.car-mode .mm-toggle-row,
+body.car-mode .avoid-item,
+body.car-mode .ss-row {
+    min-height: 70px;
+    font-size: 18px;
+}
+
+body.car-mode .search-go,
+body.car-mode .add-fav-btn,
+body.car-mode .ts-close,
+body.car-mode #dest {
+    min-height: 60px;
+    font-size: 18px;
+}
+
+@media (orientation: landscape) and (max-height: 620px) {
+    body.car-mode #mainMenu,
+    body.car-mode #settingsSub,
+    body.car-mode #routeChoicePanel,
+    body.car-mode #reportPanel,
+    body.car-mode #tripSummaryPanel {
+        right: auto;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        left: calc(12px + env(safe-area-inset-left));
+        width: min(430px, 42vw);
+        border-radius: var(--panel-radius);
+        border-bottom: 1px solid var(--border-dark);
+    }
+
+    body.day-mode.car-mode #mainMenu,
+    body.day-mode.car-mode #settingsSub,
+    body.day-mode.car-mode #routeChoicePanel,
+    body.day-mode.car-mode #reportPanel,
+    body.day-mode.car-mode #tripSummaryPanel {
+        border-bottom-color: var(--border);
+    }
+
+    body.car-mode #topBar {
+        right: calc(96px + env(safe-area-inset-right));
+        padding-right: 18px;
+    }
+
+    body.car-mode #mobileNavActions {
+        right: calc(112px + env(safe-area-inset-right));
+        bottom: calc(18px + env(safe-area-inset-bottom));
+        left: calc(132px + env(safe-area-inset-left));
+        max-width: 430px;
+    }
+
+    body.car-mode #speedBar {
+        right: calc(96px + env(safe-area-inset-right));
+        left: calc(132px + env(safe-area-inset-left));
+        border-radius: 18px 18px 0 0;
+    }
+}
+
 /* ===== RESPONSYWNOSC ===== */
 @media (min-width: 720px) {
-    #mobileNavActions,
-    #mobileNavActions.show {
+    body:not(.car-mode) #mobileNavActions,
+    body:not(.car-mode) #mobileNavActions.show {
         display: none;
     }
 
