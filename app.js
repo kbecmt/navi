@@ -6,7 +6,7 @@ const CONFIG={
     weatherApiKey: '', // <-- Wklej tutaj swój klucz OpenWeatherMap API
     elevationApiUrl: 'https://api.open-elevation.com/api/v1/lookup',
     hereTrafficUrl: 'https://data.traffic.hereapi.com/v7/incidents',
-    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:1000,timeout:7000},gpsIntervalMs:2000,mapPanMs:900,mapLookAheadKm:5,junctionZoomDistanceKm:0.35,junctionZoomExitKm:0.1,junctionKeepAfterKm:0.1,junctionZoom:18,debounceMs:180,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
+    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:1000,timeout:7000},gpsIntervalMs:2000,mapPanMs:900,mapLookAheadKm:5,junctionZoomDistanceKm:0.35,junctionZoomExitKm:0.1,junctionKeepAfterKm:0.1,junctionZoom:18,navAnimMinMs:650,navAnimMaxMs:3500,navAnimSpeedFloorKmh:8,debounceMs:180,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
 };
 const core = window.NaviCore;
 const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
@@ -64,6 +64,7 @@ const appState = {
     lastOffRouteWarn: 0,
     gpsQuality: { accuracy: null, lastFix: 0, ignored: false },
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
+    smoothNav: { raf: null, fromDoneKm: 0, toDoneKm: 0, startTime: 0, durationMs: 0, lastRenderDoneKm: null },
 };
 
 let settings = { routeType: 'fast', cameraZoom: 16, speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
@@ -930,9 +931,9 @@ function fitActiveRouteOverview(animate=false){
     map.invalidateSize({pan:false});
     map.fitBounds(bounds,{paddingTopLeft:[80,110],paddingBottomRight:[90,120],animate});
 }
-function smoothSetView(pos,progress=appState.routeProgress){
+function smoothSetView(pos,progress=appState.routeProgress,opts={}){
     const now=Date.now();
-    if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;
+    if(!opts.force&&now-appState.lastMapViewTime<CONFIG.debounceMs)return;
     const camera=appState.navigationActive?getNavigationCamera(progress,pos):{mode:'free',center:pos,zoom:cameraZoom()};
     appState.lastMapViewTime=now;
     appState.lastMapViewPos=camera.center;
@@ -943,9 +944,54 @@ function smoothSetView(pos,progress=appState.routeProgress){
         if(previousMode!=='overview')fitActiveRouteOverview(true);
     }else{
         map.invalidateSize({pan:false});
-        rotateMap(appState.currentBearing);
-        map.setView(camera.center,camera.zoom,{animate:previousMode==='junction',duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+        rotateMap(typeof opts.bearing==='number'?opts.bearing:appState.currentBearing);
+        map.setView(camera.center,camera.zoom,{animate:false})
     }
+}
+function updateUserMarkerPosition(pos,bearing){
+    if(!appState.userMarker){
+        appState.userMarker=L.marker(pos,{icon:createArrowIcon(bearing),zIndexOffset:1000}).addTo(map);
+    }else{
+        appState.userMarker.setLatLng(pos);
+        appState.userMarker.setIcon(createArrowIcon(bearing));
+    }
+}
+function renderSmoothNavigation(doneKm){
+    const p=pointAtRouteDistance(doneKm);
+    if(!p)return;
+    const pos=L.latLng(p.lat,p.lng);
+    const bearing=typeof p.bearing==='number'?p.bearing:appState.currentBearing;
+    const progress=projectGpsToRoute(p.lat,p.lng);
+    appState.smoothNav.lastRenderDoneKm=progress.doneKm;
+    updateUserMarkerPosition(pos,bearing);
+    smoothSetView(pos,progress,{force:true,bearing});
+}
+function cancelSmoothNavigation(){
+    if(appState.smoothNav.raf){cancelAnimationFrame(appState.smoothNav.raf);appState.smoothNav.raf=null}
+}
+function startSmoothNavigation(progress){
+    if(!appState.navigationActive||!appState.routeCoords.length||!progress||!progress.snapped)return;
+    const target=progress.doneKm||0;
+    let from=typeof appState.smoothNav.lastRenderDoneKm==='number'?appState.smoothNav.lastRenderDoneKm:target;
+    if(Math.abs(target-from)>0.8)from=target;
+    if(target<from)from=target;
+    const distKm=Math.max(0,target-from);
+    const speedKmh=Math.max(appState.currentSpeed||0,CONFIG.navAnimSpeedFloorKmh);
+    const durationMs=Math.max(CONFIG.navAnimMinMs,Math.min(CONFIG.navAnimMaxMs,(distKm/speedKmh)*3600000||CONFIG.navAnimMinMs));
+    cancelSmoothNavigation();
+    appState.smoothNav.fromDoneKm=from;
+    appState.smoothNav.toDoneKm=target;
+    appState.smoothNav.startTime=performance.now();
+    appState.smoothNav.durationMs=durationMs;
+    if(distKm<0.002){renderSmoothNavigation(target);return}
+    const step=ts=>{
+        const t=Math.min(1,(ts-appState.smoothNav.startTime)/appState.smoothNav.durationMs);
+        const done=appState.smoothNav.fromDoneKm+(appState.smoothNav.toDoneKm-appState.smoothNav.fromDoneKm)*t;
+        renderSmoothNavigation(done);
+        if(t<1)appState.smoothNav.raf=requestAnimationFrame(step);
+        else appState.smoothNav.raf=null;
+    };
+    appState.smoothNav.raf=requestAnimationFrame(step);
 }
 function isGpsFixUsable(lat,lng,accuracy,now){
     if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
@@ -969,13 +1015,12 @@ function processGpsPosition(pos){
     const displayPos=appState.navigationActive?appState.routeProgress.snapped:appState.userPos;
     if(appState.navigationActive){
         updateCenterUserMarker(false);
-        if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
     }else{
         updateCenterUserMarker(false);
-        if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
+        updateUserMarkerPosition(displayPos,appState.currentBearing);
     }
     if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,cameraZoom())}
-    if(appState.navigationActive){checkRouteProximity(lat,lng);smoothSetView(displayPos,appState.routeProgress);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
+    if(appState.navigationActive){checkRouteProximity(lat,lng);startSmoothNavigation(appState.routeProgress);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
     document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
     document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
 }
@@ -1013,6 +1058,8 @@ function updateSimulationButtons(){const label=document.getElementById('simulati
 function startSimulation(){
     if(!appState.navigationActive||!appState.routeCoords.length)return alert('Najpierw uruchom trasę.');
     stopSimulation(false);
+    cancelSmoothNavigation();
+    appState.smoothNav.lastRenderDoneKm=appState.routeProgress.doneKm||0;
     appState.simulation.active=true;
     appState.simulation.doneKm=appState.routeProgress.doneKm||0;
     appState.lastLat=null;appState.lastLng=null;appState.lastTime=null;
@@ -1493,6 +1540,8 @@ function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
     appState.navigationActive = true;
     appState.navCameraMode='idle';
     appState.junctionFocusDoneKm=null;
+    cancelSmoothNavigation();
+    appState.smoothNav.lastRenderDoneKm=null;
     resetMapRotation();
     fitActiveRouteOverview(false);
     if (!appState.isRerouting) { // Don't repeat "Navigation started" on reroute
@@ -1542,8 +1591,9 @@ function closeTripSummary() {
 function stopNav(){
     // Reset only navigation-related state, keep persistent user data like incidents
     stopSimulation(false);
+    cancelSmoothNavigation();
     exitNavigationOfflineMode();
-    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'idle',junctionFocusDoneKm:null,lastMapViewPos:null,lastMapViewTime:0,poiLoadSeq:appState.poiLoadSeq+1});
+    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'idle',junctionFocusDoneKm:null,lastMapViewPos:null,lastMapViewTime:0,smoothNav:{raf:null,fromDoneKm:0,toDoneKm:0,startTime:0,durationMs:0,lastRenderDoneKm:null},poiLoadSeq:appState.poiLoadSeq+1});
     routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');resetMapRotation();['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 
@@ -1703,6 +1753,8 @@ function resumeLastRoute(savedRoute) {
     Object.assign(appState, { lastSpokenIdx: -1, instructionIndex: 0, spoken500m: new Set(), spokenCameras500m: new Set() });
     appState.navCameraMode='idle';
     appState.junctionFocusDoneKm=null;
+    cancelSmoothNavigation();
+    appState.smoothNav.lastRenderDoneKm=null;
     resetMapRotation();
     fitActiveRouteOverview(false);
     

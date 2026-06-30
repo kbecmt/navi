@@ -1,4 +1,4 @@
-const APP_CACHE_NAME='navi-app-v9';
+const APP_CACHE_NAME='navi-app-v10';
 const TILES_CACHE_NAME='navi-tiles-v1';
 const ASSETS=['index.html','style.css','navi-core.js','app.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js'];
 
