@@ -105,7 +105,11 @@ function finishSpeech(t){speechBusy=false;if(t)t.classList.remove('show');clearT
 function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!('speechSynthesis'in window)||!('SpeechSynthesisUtterance'in window)){speechQueue=[];showVoiceToast('Lektor niedostępny w Chrome');return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.resume();speechBusy=true;const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=()=>finishSpeech(t);u.onerror=()=>finishSpeech(t);window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>finishSpeech(t),Math.max(3500,text.length*95))}catch(e){speechBusy=false;speechQueue=[];showVoiceToast('Nie udało się uruchomić lektora')}}
 function speak(text){if(!settings.voiceEnabled||!text)return;unlockSpeech();haptic();playBeep();speechQueue=[text];processSpeechQueue()}
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){unlockSpeech();speak('Lektor włączony')}}
-function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);speechQueue=[];speechBusy=false;if(window.speechSynthesis)window.speechSynthesis.cancel();speak('Lektor Chrome włączony. Powiadomienia głosowe działają.')}
+function isTouchDevice(){return matchMedia('(pointer: coarse)').matches||'ontouchstart'in window}
+function showVoiceUnlock(force=false){const el=document.getElementById('voiceUnlockPanel');if(!el)return;if(!settings.voiceEnabled||!('speechSynthesis'in window)||(!force&&(!isTouchDevice()||localStorage.getItem('naviVoiceUnlocked')==='1')))return;el.classList.add('show')}
+function hideVoiceUnlock(){const el=document.getElementById('voiceUnlockPanel');if(el)el.classList.remove('show')}
+function dismissVoiceUnlock(){try{localStorage.setItem('naviVoiceUnlocked','1')}catch(e){}hideVoiceUnlock()}
+function testMobileSound(){settings.voiceEnabled=true;syncVoiceButtons();saveSettings();unlockSpeech();playBeep(660,0.12);speechQueue=[];speechBusy=false;if(window.speechSynthesis)window.speechSynthesis.cancel();try{localStorage.setItem('naviVoiceUnlocked','1')}catch(e){}hideVoiceUnlock();speak('Lektor Chrome włączony. Powiadomienia głosowe działają.')}
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
 document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
@@ -1096,7 +1100,7 @@ function checkRouteProximity(lat, lng) {
     }
 }
 function startNav() {
-    if(settings.voiceEnabled)unlockSpeech();
+    if(settings.voiceEnabled){unlockSpeech();showVoiceUnlock(true)}
     const q = document.getElementById('dest').value;
     if (!q) return alert("Wpisz cel podróży");
     if (!appState.userPos) return alert("Oczekiwanie na GPS…");
@@ -1679,6 +1683,7 @@ function initApp() {
     document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);
     applyCarMode();
     syncVoiceButtons();
+    setTimeout(()=>showVoiceUnlock(),600);
     document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);
     document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
