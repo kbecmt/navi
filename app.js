@@ -98,7 +98,7 @@ function toggleCarMode(){settings.carMode=!settings.carMode;applyCarMode();saveS
 function ensureCenterUserMarker(){let el=document.getElementById('centerUserMarker');if(!el){el=document.createElement('div');el.id='centerUserMarker';el.innerHTML='<svg class="center-user-arrow" viewBox="0 0 42 42"><circle cx="21" cy="21" r="17" fill="#2979ff" stroke="white" stroke-width="3.5" opacity="0.96"/><polygon points="21,6 28,31 21,25 14,31" fill="white"/></svg>';document.body.appendChild(el)}return el}
 function updateCenterUserMarker(show){const el=ensureCenterUserMarker();el.classList.toggle('show',!!show)}
 function syncVoiceButtons(){const label=settings.voiceEnabled?'🔊':'🔇';const sb=document.getElementById('btnSound');const mb=document.getElementById('mobileBtnSound');if(sb)sb.textContent=label;if(mb)mb.textContent=label;const toggle=document.getElementById('voiceToggle');if(toggle)toggle.classList.toggle('on',settings.voiceEnabled)}
-let speechUnlocked=false,voiceConfirmed=false,availableVoices=[],audioCtx=null,speechQueue=[],speechBusy=false,speechWatchdog=null,voiceUnlockDismissed=false;
+let speechUnlocked=false,voiceConfirmed=false,availableVoices=[],audioCtx=null,speechQueue=[],speechBusy=false,speechWatchdog=null,voiceUnlockDismissed=false,lastVoiceUnlockNotice=0;
 function refreshVoices(){try{availableVoices=window.speechSynthesis?window.speechSynthesis.getVoices():[]}catch(e){availableVoices=[]}}
 function getPolishVoice(){refreshVoices();return availableVoices.find(v=>/^pl([-_]|$)/i.test(v.lang))||availableVoices.find(v=>/polski|polish/i.test(v.name))||null}
 function canUseSpeech(){return 'speechSynthesis'in window&&'SpeechSynthesisUtterance'in window}
@@ -106,17 +106,19 @@ function markVoiceConfirmedSession(){voiceConfirmed=true;try{sessionStorage.setI
 function isVoiceConfirmedSession(){if(voiceConfirmed)return true;try{return sessionStorage.getItem('naviVoiceConfirmedThisSession')==='1'}catch(e){return false}}
 function unlockAudio(){try{const Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;if(!audioCtx)audioCtx=new Ctx();if(audioCtx.state==='suspended')audioCtx.resume()}catch(e){}}
 function playBeep(freq=880,duration=0.14){try{unlockAudio();if(!audioCtx)return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='sine';osc.frequency.value=freq;gain.gain.setValueAtTime(0.001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.18,audioCtx.currentTime+0.02);gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+duration);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+duration+0.03)}catch(e){}}
+function makeSpeechUtterance(text,volume=1){const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=volume;const voice=getPolishVoice();if(voice)u.voice=voice;return u}
 function unlockSpeech(){if(speechUnlocked)return true;try{unlockAudio();if(!canUseSpeech())return false;refreshVoices();window.speechSynthesis.resume();const u=new SpeechSynthesisUtterance(' ');u.lang='pl-PL';u.volume=0.01;u.rate=1;const voice=getPolishVoice();if(voice)u.voice=voice;window.speechSynthesis.speak(u);speechUnlocked=true;return true}catch(e){return false}}
 function showVoiceToast(text){const t=document.getElementById('voiceToast');if(!t)return;t.textContent=text;t.classList.add('show');return t}
 function finishSpeech(t){speechBusy=false;if(t)t.classList.remove('show');clearTimeout(speechWatchdog);speechWatchdog=null;processSpeechQueue()}
-function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!canUseSpeech()){speechQueue=[];showVoiceToast('Lektor niedostępny w tej przeglądarce');showVoiceUnlock(true);return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.cancel();window.speechSynthesis.resume();speechBusy=true;const u=new SpeechSynthesisUtterance(text);u.lang='pl-PL';u.rate=0.96;u.pitch=1;u.volume=1;const voice=getPolishVoice();if(voice)u.voice=voice;const t=showVoiceToast(text);u.onend=()=>finishSpeech(t);u.onerror=()=>{speechUnlocked=false;voiceConfirmed=false;finishSpeech(t);showVoiceUnlock(true)};window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>{try{window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}finishSpeech(t)},Math.max(4500,text.length*110))}catch(e){speechBusy=false;speechQueue=[];speechUnlocked=false;voiceConfirmed=false;showVoiceToast('Nie udało się uruchomić lektora');showVoiceUnlock(true)}}
-function speak(text){if(!settings.voiceEnabled||!text)return;if(isTouchDevice()&&!isVoiceConfirmedSession()){showVoiceUnlock(true);showVoiceToast('Dotknij Włącz głos, aby uruchomić lektora.');return}if(!unlockSpeech()){showVoiceUnlock(true);return}haptic();playBeep();speechQueue=[text];processSpeechQueue()}
+function processSpeechQueue(){if(speechBusy||!speechQueue.length)return;if(!canUseSpeech()){speechQueue=[];showVoiceToast('Lektor niedostępny w tej przeglądarce');showVoiceUnlock(true);return}const text=speechQueue.shift();try{refreshVoices();window.speechSynthesis.cancel();window.speechSynthesis.resume();speechBusy=true;const u=makeSpeechUtterance(text);const t=showVoiceToast(text);u.onstart=()=>{speechUnlocked=true};u.onend=()=>finishSpeech(t);u.onerror=()=>{speechUnlocked=false;voiceConfirmed=false;finishSpeech(t);showVoiceUnlock(true)};window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>{try{window.speechSynthesis.cancel();window.speechSynthesis.resume()}catch(e){}finishSpeech(t)},Math.max(4500,text.length*110))}catch(e){speechBusy=false;speechQueue=[];speechUnlocked=false;voiceConfirmed=false;showVoiceToast('Nie udało się uruchomić lektora');showVoiceUnlock(true)}}
+function speakNowFromGesture(text){if(!canUseSpeech()){showVoiceToast('Ta przeglądarka nie obsługuje lektora');showVoiceUnlock(true);return false}try{unlockAudio();refreshVoices();clearTimeout(speechWatchdog);speechWatchdog=null;speechQueue=[];speechBusy=true;window.speechSynthesis.cancel();window.speechSynthesis.resume();const u=makeSpeechUtterance(text);const t=showVoiceToast(text);markVoiceConfirmedSession();speechUnlocked=true;hideVoiceUnlock();u.onstart=()=>{markVoiceConfirmedSession();speechUnlocked=true;hideVoiceUnlock()};u.onend=()=>finishSpeech(t);u.onerror=()=>{speechUnlocked=false;voiceConfirmed=false;finishSpeech(t);showVoiceToast('Kliknij Włącz głos jeszcze raz');showVoiceUnlock(true)};window.speechSynthesis.speak(u);speechWatchdog=setTimeout(()=>{try{window.speechSynthesis.resume()}catch(e){}finishSpeech(t)},Math.max(6000,text.length*130));return true}catch(e){speechBusy=false;speechUnlocked=false;voiceConfirmed=false;showVoiceToast('Nie udało się uruchomić lektora');showVoiceUnlock(true);return false}}
+function speak(text){if(!settings.voiceEnabled||!text)return;if(isTouchDevice()&&!isVoiceConfirmedSession()){showVoiceUnlock(true);const now=Date.now();if(now-lastVoiceUnlockNotice>8000){lastVoiceUnlockNotice=now;showVoiceToast('Dotknij Włącz głos, aby uruchomić lektora.')}return}if(!unlockSpeech()){showVoiceUnlock(true);return}haptic();playBeep();speechQueue=[text];processSpeechQueue()}
 function toggleVoice(){settings.voiceEnabled=!settings.voiceEnabled;syncVoiceButtons();saveSettings();if(settings.voiceEnabled){voiceUnlockDismissed=false;unlockSpeech();showVoiceUnlock(true);if(isVoiceConfirmedSession())speak('Lektor włączony')}}
 function isTouchDevice(){return matchMedia('(pointer: coarse)').matches||'ontouchstart'in window}
 function showVoiceUnlock(force=false){const el=document.getElementById('voiceUnlockPanel');if(!el)return;if(!settings.voiceEnabled||!canUseSpeech())return;if(!force&&(!isTouchDevice()||voiceUnlockDismissed||isVoiceConfirmedSession()))return;el.classList.add('show')}
 function hideVoiceUnlock(){const el=document.getElementById('voiceUnlockPanel');if(el)el.classList.remove('show')}
 function dismissVoiceUnlock(){voiceUnlockDismissed=true;hideVoiceUnlock()}
-function testMobileSound(){settings.voiceEnabled=true;voiceUnlockDismissed=false;syncVoiceButtons();saveSettings();speechQueue=[];speechBusy=false;clearTimeout(speechWatchdog);speechWatchdog=null;if(canUseSpeech())window.speechSynthesis.cancel();speechUnlocked=false;const ok=unlockSpeech();playBeep(660,0.12);if(!ok){showVoiceToast('Ta przeglądarka nie obsługuje lektora');showVoiceUnlock(true);return}markVoiceConfirmedSession();hideVoiceUnlock();speechQueue=['Lektor włączony. Powiadomienia głosowe działają.'];processSpeechQueue()}
+function testMobileSound(){settings.voiceEnabled=true;voiceUnlockDismissed=false;syncVoiceButtons();saveSettings();playBeep(660,0.12);speakNowFromGesture('Lektor włączony. Powiadomienia głosowe działają.')}
 function getVoiceStatusText(){
     if(!settings.voiceEnabled)return'Lektor wyłączony';
     if(!canUseSpeech())return'Lektor niedostępny w tej przeglądarce';
@@ -394,7 +396,7 @@ function openAppStatusPanel(){
         ['Dane OSM',osmText],
         ['Lektor',getVoiceStatusText()],
         ['PWA cache',swActive?'aktywny':'nieaktywny'],
-        ['Wersja cache','navi-app-v14']
+        ['Wersja cache','navi-app-v15']
     ];
     rows.forEach(([label,value])=>{
         const row=createDOMElement('div',{className:'ss-row'});
@@ -970,7 +972,7 @@ function fitActiveRouteOverview(animate=false){
 function smoothSetView(pos,progress=appState.routeProgress,opts={}){
     const now=Date.now();
     if(!opts.force&&now-appState.lastMapViewTime<CONFIG.debounceMs)return;
-    const camera=appState.navigationActive?getNavigationCamera(progress,pos):{mode:'free',center:pos,zoom:cameraZoom()};
+    const camera=opts.camera||(appState.navigationActive?getNavigationCamera(progress,pos):{mode:'free',center:pos,zoom:cameraZoom()});
     appState.lastMapViewTime=now;
     appState.lastMapViewPos=camera.center;
     const previousMode=appState.navCameraMode;
@@ -998,9 +1000,11 @@ function renderSmoothNavigation(doneKm){
     const pos=L.latLng(p.lat,p.lng);
     const bearing=typeof p.bearing==='number'?p.bearing:appState.currentBearing;
     const progress=projectGpsToRoute(p.lat,p.lng);
+    const camera=appState.navigationActive?getNavigationCamera(progress,pos):{mode:'free',center:pos,zoom:cameraZoom()};
+    const markerBearing=camera.mode==='junction'?0:bearing;
     appState.smoothNav.lastRenderDoneKm=progress.doneKm;
-    updateUserMarkerPosition(pos,bearing);
-    smoothSetView(pos,progress,{force:true,bearing});
+    updateUserMarkerPosition(pos,markerBearing);
+    smoothSetView(pos,progress,{force:true,bearing,camera});
 }
 function cancelSmoothNavigation(){
     if(appState.smoothNav.raf){cancelAnimationFrame(appState.smoothNav.raf);appState.smoothNav.raf=null}
