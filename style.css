@@ -1,0 +1,573 @@
+:root {
+  --bg: #101820;
+  --panel: rgba(21, 30, 42, 0.9);
+  --panel-strong: #172234;
+  --text: #f5f7fb;
+  --muted: #aab6c7;
+  --line: #23c66d;
+  --done: #2d8cff;
+  --warn: #ffb020;
+  --danger: #ff4d4d;
+  --border: rgba(255, 255, 255, 0.14);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  background: #2d8cff;
+  color: white;
+  font-weight: 750;
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  padding: 0 12px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #2d8cff;
+}
+
+#routeView {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  contain: layout paint;
+  background:
+    linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px),
+    radial-gradient(circle at 50% 38%, #1c2d42, #101820 62%);
+  background-size: 34px 34px, 34px 34px, auto;
+}
+
+#routeSvg {
+  position: absolute;
+  inset: calc(150px + env(safe-area-inset-top)) 5vw 18vh;
+  width: 90vw;
+  height: calc(82vh - 150px);
+  min-height: 260px;
+  filter: none;
+  transform-origin: 50% 50%;
+}
+
+#routeSvg.maneuver-camera {
+  transition: transform 0.45s linear;
+  will-change: transform;
+}
+
+.route-bg,
+.route-line,
+.route-done {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.route-bg {
+  stroke: rgba(255,255,255,0.28);
+  stroke-width: 8;
+}
+
+.route-line {
+  stroke: var(--line);
+  stroke-width: 4;
+}
+
+.route-done {
+  stroke: var(--done);
+  stroke-width: 5;
+}
+
+.route-point {
+  fill: var(--warn);
+  stroke: #111;
+  stroke-width: 0.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.maneuver-dot {
+  fill: #ffffff;
+  stroke: var(--done);
+  stroke-width: 0.3;
+  vector-effect: non-scaling-stroke;
+}
+
+.maneuver-dot.next {
+  fill: var(--warn);
+  stroke: #fff;
+  stroke-width: 0.4;
+}
+
+.poi-icon text,
+.camera-icon text {
+  font-size: 3px;
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.poi-icon circle {
+  fill: #7dd3fc;
+  stroke: rgba(255,255,255,0.8);
+  stroke-width: 0.18;
+}
+
+.poi-icon text {
+  fill: #062235;
+}
+
+.camera-icon circle {
+  fill: #ff4d4d;
+  stroke: #fff;
+  stroke-width: 0.2;
+}
+
+.camera-icon text {
+  fill: white;
+  font-size: 2.55px;
+}
+
+#vehicle {
+  position: fixed;
+  z-index: 3;
+  display: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid white;
+  background: #2d8cff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.26);
+  color: white;
+  line-height: 1;
+}
+
+#hud {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 10px;
+  right: 10px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.9fr) minmax(132px, 1.45fr) minmax(62px, 0.72fr);
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(16, 24, 32, 0.72);
+  contain: layout paint;
+}
+
+#hud div {
+  display: grid;
+  gap: 2px;
+}
+
+#hud div:last-child {
+  text-align: right;
+}
+
+#hud span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#hud strong {
+  font-size: 15px;
+}
+
+#hud small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#hud.speeding {
+  border-color: rgba(255, 77, 77, 0.95);
+  background: rgba(80, 18, 22, 0.84);
+}
+
+#hud #summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+#hud #summary div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  text-align: center;
+}
+
+#hud #summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+}
+
+#hud #summary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+#maneuverBox {
+  position: fixed;
+  top: calc(72px + env(safe-area-inset-top));
+  left: 10px;
+  right: 10px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(17, 27, 38, 0.82);
+  contain: layout paint;
+}
+
+#maneuverIcon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--line);
+  color: #07120b;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+#maneuverBox div:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#maneuverDistance {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#maneuverText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+#nextManeuverText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#panel {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  contain: layout paint;
+  transition: transform 0.24s ease, max-height 0.24s ease, background 0.24s ease;
+  max-height: calc(100vh - 130px);
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+#panel.collapsed {
+  transform: translateY(calc(100% + 18px));
+  background: rgba(21, 30, 42, 0.78);
+}
+
+#panelHandle {
+  justify-self: center;
+  width: 52px;
+  min-height: 5px;
+  height: 5px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.42);
+}
+
+#panel header {
+  cursor: pointer;
+}
+
+#panelToggleBtn {
+  width: 44px;
+  padding: 0;
+  background: rgba(255,255,255,0.12);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+#panel:not(.collapsed) #panelToggleBtn {
+  transform: rotate(180deg);
+}
+
+#bottomSheetButton {
+  position: fixed;
+  left: 50%;
+  bottom: calc(7px + env(safe-area-inset-bottom));
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(21, 30, 42, 0.84);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+#bottomSheetButton.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(18px);
+}
+
+#sheetContent,
+.sheet-actions {
+  transition: opacity 0.18s ease, transform 0.18s ease, max-height 0.24s ease;
+}
+
+#panel.collapsed #sheetContent,
+#panel.collapsed .sheet-actions {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+#menuBtn,
+#closeMenuBtn {
+  width: 44px;
+  padding: 0;
+  background: rgba(255,255,255,0.12);
+}
+
+#forms {
+  display: grid;
+  gap: 8px;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#gpsStartBox {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+}
+
+#gpsStartBox div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+#gpsStartBox span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#gpsStartBox strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+#locateBtn {
+  min-height: 38px;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.14);
+  font-size: 12px;
+}
+
+#routeBtn {
+  background: var(--line);
+  color: #07120b;
+}
+
+#panel #summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+#panel #summary div {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+}
+
+#panel #summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+#panel #summary strong {
+  font-size: 14px;
+}
+
+#actions {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+#actions button {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.13);
+}
+
+#simBtn.running {
+  background: var(--danger);
+}
+
+#drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  width: min(82vw, 330px);
+  padding: calc(16px + env(safe-area-inset-top)) 14px 14px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+  transform: translateX(105%);
+  transition: transform 0.22s ease;
+}
+
+#drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#savedInfo {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  #routeSvg {
+    inset: calc(108px + env(safe-area-inset-top)) 6vw 12vh 5vw;
+    width: 89vw;
+    height: calc(88vh - 108px);
+    min-height: 170px;
+  }
+
+  #panel {
+    left: 10px;
+    right: 10px;
+    top: auto;
+    width: auto;
+    overflow: auto;
+  }
+
+  #hud {
+    right: 10px;
+  }
+
+  #maneuverBox {
+    right: 10px;
+  }
+}

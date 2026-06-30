@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101820">
+  <title>Prosta Nawigacja</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <section id="routeView" aria-label="Podgląd zapisanej linii trasy">
+      <svg id="routeSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+      <div id="vehicle">▲</div>
+      <div id="hud">
+        <div>
+          <span id="statusText">Brak trasy</span>
+          <strong id="speedText">0 km/h</strong>
+          <small id="speedLimitText">Limit: --</small>
+        </div>
+        <div id="summary">
+          <div><span>Dystans</span><strong id="sumDistance">--</strong></div>
+          <div><span>Czas</span><strong id="sumTime">--</strong></div>
+          <div><span>Manewry</span><strong id="sumPoints">0</strong></div>
+        </div>
+        <div>
+          <span id="distanceText">--</span>
+          <span id="progressText">0%</span>
+        </div>
+      </div>
+      <div id="maneuverBox">
+        <div id="maneuverIcon">↑</div>
+        <div>
+          <span id="maneuverDistance">--</span>
+          <strong id="maneuverText">Wyznacz trasę, aby zobaczyć wskazówki</strong>
+          <small id="nextManeuverText">--</small>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel">
+      <button id="panelHandle" type="button" aria-label="Rozwiń panel"></button>
+      <header>
+        <button id="panelToggleBtn" type="button" aria-label="Rozwiń panel">⌃</button>
+        <h1>Nawigacja</h1>
+        <button id="menuBtn" type="button" aria-label="Menu">☰</button>
+      </header>
+
+      <div id="sheetContent">
+        <div id="forms">
+          <div id="gpsStartBox">
+            <div>
+              <span>Start z GPS</span>
+              <strong id="gpsStartText">Nie pobrano lokalizacji</strong>
+            </div>
+            <button id="locateBtn" type="button">Użyj GPS teraz</button>
+          </div>
+          <label>
+            Cel
+            <input id="destInput" autocomplete="street-address" placeholder="Wpisz cel">
+          </label>
+          <button id="routeBtn" type="button">Wyznacz trasę z GPS</button>
+        </div>
+      </div>
+
+      <nav id="actions" class="sheet-actions">
+        <button id="gpsBtn" type="button">GPS</button>
+        <button id="saveBtn" type="button">Zapisz</button>
+        <button id="loadBtn" type="button">Wczytaj</button>
+        <button id="simBtn" type="button">Symuluj</button>
+        <button id="stopBtn" type="button">Stop</button>
+      </nav>
+    </section>
+
+    <button id="bottomSheetButton" type="button" aria-label="Rozwiń menu">⌃</button>
+
+    <aside id="drawer">
+      <div class="drawer-head">
+        <h2>Menu</h2>
+        <button id="closeMenuBtn" type="button" aria-label="Zamknij">×</button>
+      </div>
+      <button id="voiceBtn" type="button">Test lektora</button>
+      <button id="clearBtn" type="button">Wyczyść trasę</button>
+      <div id="savedInfo">Zapis: brak</div>
+    </aside>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
