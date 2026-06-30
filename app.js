@@ -6,7 +6,7 @@ const CONFIG={
     weatherApiKey: '', // <-- Wklej tutaj swój klucz OpenWeatherMap API
     elevationApiUrl: 'https://api.open-elevation.com/api/v1/lookup',
     hereTrafficUrl: 'https://data.traffic.hereapi.com/v7/incidents',
-    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:10000,timeout:9000},gpsIntervalMs:10000,mapPanMs:1800,mapLookAheadKm:5,debounceMs:400,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
+    defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:1000,timeout:7000},gpsIntervalMs:2000,mapPanMs:900,mapLookAheadKm:5,mapOverviewAheadKm:2.5,junctionZoomDistanceKm:0.35,junctionZoomExitKm:0.08,junctionZoom:18,debounceMs:180,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
 };
 const core = window.NaviCore;
 const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
@@ -41,8 +41,12 @@ const appState = {
     routeLine: null,
     lastMapViewTime: 0,
     lastMapViewPos: null,
+    navCameraMode: 'overview',
+    gpsWatchId: null,
+    lastGpsPoll: 0,
     routePOIs: [],
     poiMarkers: [],
+    poiLoadSeq: 0,
     spoken500m: new Set(),
     spokenCameras500m: new Set(),
     currentSpeedLimit: 0,
@@ -617,11 +621,84 @@ const osmTypeMap={
     'barrier_toll_booth':{icon:'💰',type:'danger'}
 };
 let fallbackPOIs = [];
-function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
-    // Start with fallback POIs filtered by route proximity
-    const poisOnRoute = (window.fallbackPOIs || []).map(p => withRouteDistance(p)).filter(p => p.distanceFromRoute < 0.5);
-    appState.routePOIs = [...poisOnRoute];
+function buildOverpassQuery(minLat,maxLat,minLng,maxLng){
+    const bbox=`${minLat},${minLng},${maxLat},${maxLng}`;
+    return `[out:json][timeout:18];(
+node["amenity"~"fuel|parking|restaurant|cafe|hospital|pharmacy"](${bbox});
+way["amenity"~"fuel|parking|restaurant|cafe|hospital|pharmacy"](${bbox});
+node["highway"~"speed_camera|construction|traffic_signals"](${bbox});
+way["highway"~"speed_camera|construction|traffic_signals"](${bbox});
+node["barrier"="toll_booth"](${bbox});
+way["barrier"="toll_booth"](${bbox});
+node["enforcement"="maxspeed"](${bbox});
+way["enforcement"="maxspeed"](${bbox});
+);out center tags;`;
+}
+function parseSpeedLimit(value){
+    if(!value)return 50;
+    const m=String(value).match(/\d+/);
+    return m?parseInt(m[0],10):50;
+}
+function normalizeOverpassElement(el){
+    const tags=el.tags||{};
+    const lat=typeof el.lat==='number'?el.lat:el.center&&el.center.lat;
+    const lng=typeof el.lon==='number'?el.lon:el.center&&el.center.lon;
+    if(typeof lat!=='number'||typeof lng!=='number')return null;
+    let key='';
+    if(tags.brand&&osmTypeMap['brand_'+tags.brand])key='brand_'+tags.brand;
+    else if(tags.amenity)key='amenity_'+tags.amenity;
+    else if(tags.highway)key='highway_'+tags.highway;
+    else if(tags.barrier)key='barrier_'+tags.barrier;
+    else if(tags.enforcement==='maxspeed')key='highway_speed_camera';
+    const meta=osmTypeMap[key];
+    if(!meta)return null;
+    const isSpeedCamera=meta.isSpeedCamera||tags.highway==='speed_camera'||tags.enforcement==='maxspeed';
+    return {
+        lat,lng,
+        name:tags.name||tags.brand||(isSpeedCamera?'Fotoradar':'POI'),
+        limit:isSpeedCamera?parseSpeedLimit(tags.maxspeed):undefined,
+        icon:meta.icon,
+        type:meta.type,
+        style:meta.style,
+        source:'overpass'
+    };
+}
+function uniquePoiList(items){
+    const seen=new Set();
+    return items.filter(item=>{
+        const key=`${item.type}:${Math.round(item.lat*10000)}:${Math.round(item.lng*10000)}:${item.name||''}`;
+        if(seen.has(key))return false;
+        seen.add(key);
+        return true;
+    });
+}
+async function fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng){
+    if(appState.offlineNavigation&&!navigator.onLine)return[];
+    const body='data='+encodeURIComponent(buildOverpassQuery(minLat,maxLat,minLng,maxLng));
+    const response=await fetch(CONFIG.overpassUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body});
+    if(!response.ok)throw new Error('Overpass HTTP '+response.status);
+    const data=await response.json();
+    return (data.elements||[]).map(normalizeOverpassElement).filter(Boolean);
+}
+async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
+    const seq=++appState.poiLoadSeq;
+    const fallbackOnRoute=(window.fallbackPOIs||[]).map(p=>withRouteDistance(p)).filter(p=>p.distanceFromRoute<0.5);
+    appState.routePOIs=uniquePoiList(fallbackOnRoute);
     renderPOIMarkers();
+    try{
+        const online=await fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng);
+        if(seq!==appState.poiLoadSeq)return;
+        const enriched=online.map(p=>withRouteDistance(p)).filter(p=>p.distanceFromRoute<0.5);
+        const onlineCameras=enriched.filter(p=>p.type==='camera');
+        const onlinePois=enriched.filter(p=>p.type!=='camera');
+        routeCameras=uniquePoiList([...routeCameras,...onlineCameras]).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
+        appState.routePOIs=uniquePoiList([...fallbackOnRoute,...onlinePois]).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
+        clearRoutePreviewCache();
+        renderPOIMarkers();
+        updateRouteStrip();
+    }catch(e){
+        console.warn('Online POI load failed',e);
+    }
 }
 
 function createPoiIcon(poi) {
@@ -815,14 +892,32 @@ function routeDistanceAhead(item, routeProgress){
 }
 function updateRouteStrip(){if(!appState.routeCoords.length||!appState.navigationActive)return;const track=document.getElementById('sbTrack'),progress=document.getElementById('sbProgress'),routeProgress=appState.routeProgress;const closestIdx=routeProgress.closestIndex||0;progress.style.height=routeProgress.percent+'%';track.querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());const lookAhead=5;for(const inst of appState.routeInstructions){if(inst.text==='Dotrzyj do celu'||inst.index<closestIdx)continue;const instDist=Math.max(0,(appState.routeCumulativeDists[inst.index]||0)-routeProgress.doneKm);appendRouteStripMarker(track,instDist,lookAhead,'turn',bearingToArrow(inst.bearing||0))}if(settings.poiFilters['camera']!==false){for(const cam of routeCameras){appendRouteStripMarker(track,routeDistanceAhead(cam,routeProgress),lookAhead,'camera','📸')}}for(const poi of appState.routePOIs){if(settings.poiFilters[poi.type]===false)continue;appendRouteStripMarker(track,routeDistanceAhead(poi,routeProgress),lookAhead,poi.type,poi.icon||'•')}for(const incident of appState.userIncidents){appendRouteStripMarker(track,routeDistanceAhead(incident,routeProgress),lookAhead,incident.type||'danger',incident.icon||'⚠️')}}
 function routePointAhead(progress, kmAhead){const target=(progress.doneKm||0)+kmAhead;return pointAtRouteDistance(target)}
-function smoothSetView(pos){
+function nextInstructionDistance(progress){return core.distanceToNextInstructionKm(progress,appState.routeInstructions,appState.routeCumulativeDists,appState.instructionIndex)}
+function getNavigationCamera(progress,pos){
+    const nextDist=nextInstructionDistance(progress);
+    const zooming=core.shouldZoomForManeuver(nextDist,CONFIG.junctionZoomDistanceKm,CONFIG.junctionZoomExitKm,appState.navCameraMode==='junction');
+    const ahead=routePointAhead(progress,zooming?Math.min(0.18,Math.max(0.06,nextDist*0.6)):CONFIG.mapOverviewAheadKm);
+    const center=ahead?L.latLng((pos.lat+ahead.lat)/2,(pos.lng+ahead.lng)/2):pos;
+    return {mode:zooming?'junction':'overview',center,zoom:zooming?CONFIG.junctionZoom:cameraZoom(),ahead,nextDist};
+}
+function smoothSetView(pos,progress=appState.routeProgress){
     const now=Date.now();
     if(now-appState.lastMapViewTime<CONFIG.debounceMs)return;
-    if(appState.lastMapViewPos&&haversine(pos.lat,pos.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.005)return;
+    const camera=appState.navigationActive?getNavigationCamera(progress,pos):{mode:'free',center:pos,zoom:cameraZoom()};
+    if(appState.lastMapViewPos&&haversine(camera.center.lat,camera.center.lng,appState.lastMapViewPos.lat,appState.lastMapViewPos.lng)<0.003&&camera.mode===appState.navCameraMode)return;
     appState.lastMapViewTime=now;
-    appState.lastMapViewPos=pos;
+    appState.lastMapViewPos=camera.center;
+    appState.navCameraMode=camera.mode;
     map.invalidateSize({pan:false});
-    map.setView(pos,cameraZoom(),{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+    if(camera.mode==='overview'&&appState.routeCoords.length){
+        const bounds=L.latLngBounds([pos]);
+        if(camera.ahead)bounds.extend(camera.ahead);
+        const inst=appState.routeInstructions[appState.instructionIndex];
+        if(inst)bounds.extend([inst.lat,inst.lng]);
+        map.fitBounds(bounds,{paddingTopLeft:[90,120],paddingBottomRight:[90,120],maxZoom:camera.zoom,animate:true,duration:CONFIG.mapPanMs/1000});
+    }else{
+        map.setView(camera.center,camera.zoom,{animate:true,duration:CONFIG.mapPanMs/1000,easeLinearity:0.25})
+    }
 }
 function isGpsFixUsable(lat,lng,accuracy,now){
     if(accuracy&&accuracy>CONFIG.gpsMaxAccuracyM&&appState.lastLat!==null)return false;
@@ -833,6 +928,7 @@ function isGpsFixUsable(lat,lng,accuracy,now){
 }
 function updateGpsQuality(accuracy,ignored){appState.gpsQuality={accuracy:accuracy||null,lastFix:Date.now(),ignored:!!ignored};const limit=document.getElementById('scLimit');if(!appState.currentSpeedLimit&&limit){limit.textContent=ignored?'GPS?':accuracy?Math.round(accuracy)+'m':'—'}}
 function processGpsPosition(pos){
+    if(appState.simulation.active&&!pos.synthetic)return;
     const lat=pos.coords.latitude,lng=pos.coords.longitude,heading=pos.coords.heading,accuracy=pos.coords.accuracy,now=Date.now();
     if(!isGpsFixUsable(lat,lng,accuracy,now)){updateGpsQuality(accuracy,true);return}
     updateGpsQuality(accuracy,false);
@@ -851,14 +947,21 @@ function processGpsPosition(pos){
         if(!appState.userMarker){appState.userMarker=L.marker(displayPos,{icon:createArrowIcon(appState.currentBearing),zIndexOffset:1000}).addTo(map)}else{appState.userMarker.setLatLng(displayPos);appState.userMarker.setIcon(createArrowIcon(appState.currentBearing))}
     }
     if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,cameraZoom())}
-    if(appState.navigationActive){smoothSetView(displayPos);rotateMap(appState.currentBearing);checkRouteProximity(lat,lng);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
+    if(appState.navigationActive){checkRouteProximity(lat,lng);smoothSetView(displayPos,appState.routeProgress);rotateMap(appState.currentBearing);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
     document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
     document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
 }
 function handleGpsError(err){console.log("GPS:",err);if(!appState.gpsCentered){appState.gpsCentered=true;map.setView([50.06,19.94],15)}}
-function pollGps(){if(appState.simulation.active)return;navigator.geolocation.getCurrentPosition(processGpsPosition,handleGpsError,CONFIG.gpsOptions)}
-pollGps();
-setInterval(pollGps,CONFIG.gpsIntervalMs);
+function pollGps(){if(appState.simulation.active||!navigator.geolocation)return;appState.lastGpsPoll=Date.now();navigator.geolocation.getCurrentPosition(processGpsPosition,handleGpsError,CONFIG.gpsOptions)}
+function startGpsTracking(){
+    if(!navigator.geolocation)return handleGpsError({message:'Geolocation unavailable'});
+    if(appState.gpsWatchId===null&&navigator.geolocation.watchPosition){
+        appState.gpsWatchId=navigator.geolocation.watchPosition(processGpsPosition,handleGpsError,CONFIG.gpsOptions);
+    }
+    pollGps();
+}
+startGpsTracking();
+setInterval(()=>{if(!appState.simulation.active&&Date.now()-appState.gpsQuality.lastFix>CONFIG.gpsIntervalMs)pollGps()},CONFIG.gpsIntervalMs);
 function pointAtRouteDistance(doneKm){
     if(!appState.routeCoords.length)return null;
     const total=appState.routeCumulativeDists[appState.routeCumulativeDists.length-1]||0;
@@ -889,7 +992,7 @@ function startSimulation(){
         appState.simulation.doneKm+=appState.simulation.speedKmh/3600;
         const p=pointAtRouteDistance(appState.simulation.doneKm);
         if(!p){stopSimulation();return}
-        processGpsPosition({coords:{latitude:p.lat,longitude:p.lng,heading:p.bearing,accuracy:5,speed:appState.simulation.speedKmh/3.6}});
+        processGpsPosition({synthetic:true,coords:{latitude:p.lat,longitude:p.lng,heading:p.bearing,accuracy:5,speed:appState.simulation.speedKmh/3.6}});
         if(appState.routeProgress.remainingKm<=CONFIG.cameraNearRange)stopSimulation(false);
     },1000);
     updateSimulationButtons();
@@ -1408,7 +1511,7 @@ function stopNav(){
     // Reset only navigation-related state, keep persistent user data like incidents
     stopSimulation(false);
     exitNavigationOfflineMode();
-    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0});
+    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'overview',lastMapViewPos:null,lastMapViewTime:0,poiLoadSeq:appState.poiLoadSeq+1});
     routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');rotateMap(0);['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 

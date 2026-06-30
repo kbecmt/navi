@@ -24,6 +24,15 @@ assert.strictEqual(core.isJunctionManeuver('turn', 'straight'), false);
 assert.strictEqual(core.isJunctionManeuver('continue', 'straight'), false);
 assert.strictEqual(core.isJunctionManeuver('roundabout', ''), true);
 
+const instructions = [
+    { index: 1, text: 'Skręć w prawo' },
+    { index: 2, text: 'Dotrzyj do celu' }
+];
+assert(core.distanceToNextInstructionKm({ doneKm: 0.4 }, instructions, metrics.cumulative, 0) > 0.2);
+assert.strictEqual(core.shouldZoomForManeuver(0.2, 0.35, 0.08, false), true);
+assert.strictEqual(core.shouldZoomForManeuver(0.04, 0.35, 0.08, true), false);
+assert.strictEqual(core.shouldZoomForManeuver(0.7, 0.35, 0.08, true), false);
+
 const summary = core.summarizePois([
     { type: 'camera' },
     { type: 'fuel' },

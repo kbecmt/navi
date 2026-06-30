@@ -78,6 +78,27 @@
         return !(type === 'turn' && (!modifier || modifier === 'straight'));
     }
 
+    function distanceToNextInstructionKm(progress, instructions, cumulativeDists, currentIndex) {
+        if (!progress || !instructions || !instructions.length) return Infinity;
+        const start = Math.max(0, currentIndex || 0);
+        for (let i = start; i < instructions.length; i++) {
+            const inst = instructions[i];
+            if (!inst) continue;
+            const instDone = cumulativeDists && typeof inst.index === 'number' ? cumulativeDists[inst.index] : null;
+            const dist = Math.max(0, (typeof instDone === 'number' ? instDone : progress.doneKm) - (progress.doneKm || 0));
+            if (dist >= 0) return dist;
+        }
+        return Infinity;
+    }
+
+    function shouldZoomForManeuver(distanceKm, enterKm, exitKm, lastZooming) {
+        if (!Number.isFinite(distanceKm)) return false;
+        const enter = typeof enterKm === 'number' ? enterKm : 0.35;
+        const exit = typeof exitKm === 'number' ? exitKm : 0.08;
+        if (distanceKm <= exit) return false;
+        return lastZooming ? distanceKm <= enter * 1.25 : distanceKm <= enter;
+    }
+
     function summarizePois(pois) {
         return pois.reduce((acc, poi) => {
             const type = poi.type || (poi.limit ? 'camera' : 'poi');
@@ -87,5 +108,5 @@
         }, { total: 0 });
     }
 
-    return { haversine, buildCumulativeDists, projectPointToRoute, distToCoords, nearestRouteIndex, isJunctionManeuver, summarizePois };
+    return { haversine, buildCumulativeDists, projectPointToRoute, distToCoords, nearestRouteIndex, isJunctionManeuver, distanceToNextInstructionKm, shouldZoomForManeuver, summarizePois };
 });
