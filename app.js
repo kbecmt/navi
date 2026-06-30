@@ -9,8 +9,45 @@ const CONFIG={
     defaultZoom:16,gpsOptions:{enableHighAccuracy:true,maximumAge:1000,timeout:7000},gpsIntervalMs:2000,mapPanMs:900,mapLookAheadKm:5,junctionZoomDistanceKm:0.35,junctionZoomExitKm:0.1,junctionKeepAfterKm:0.1,junctionZoom:18,navAnimMinMs:650,navAnimMaxMs:3500,navAnimSpeedFloorKmh:8,debounceMs:180,gpsMaxAccuracyM:80,gpsJumpSpeedKmh:230,passedManeuverKm:0.035,cameraAlertRange:0.5,cameraShowRange:2,cameraNearRange:0.03,preNotifyRange:0.5,rerouteThreshold: 0.075, elevationDownsample: 100, speedWarnCooldown:8000,speechResumeInterval:3000,autoNightStart:20,autoNightEnd:7,offRouteWarnCooldown:15000,routeChoiceOnlineExtras:false
 };
 const core = window.NaviCore;
-const map = L.map('map', { zoomControl: false, rotate: true, rotateControl: false }).setView([51.5, -0.09], 5);
-L.control.zoom({ position: 'bottomright' }).addTo(map);
+const NO_LEAFLET_MODE = true;
+const L = window.L || {
+    latLng:(lat,lng)=>({lat:parseFloat(lat),lng:parseFloat(lng)}),
+    divIcon:(opts={})=>opts,
+    marker:(pos,opts={})=>({
+        pos,opts,
+        addTo(){return this},
+        setLatLng(p){this.pos=p;return this},
+        setIcon(icon){this.opts.icon=icon;return this},
+        bindTooltip(){return this}
+    }),
+    polyline:(coords,opts={})=>({
+        coords,opts,
+        addTo(){return this},
+        setStyle(style){Object.assign(this.opts,style);return this},
+        getBounds(){return createBounds(coords.map(c=>Array.isArray(c)?{lat:c[0],lng:c[1]}:c))}
+    }),
+    latLngBounds:createBounds
+};
+function createBounds(coords=[]){
+    const values=coords.map(c=>Array.isArray(c)?{lat:c[0],lng:c[1]}:c).filter(c=>c&&Number.isFinite(c.lat)&&Number.isFinite(c.lng));
+    return {
+        coords:values,
+        extend(p){this.coords.push(Array.isArray(p)?{lat:p[0],lng:p[1]}:p);return this},
+        getNorth(){return Math.max(...this.coords.map(c=>c.lat))},
+        getSouth(){return Math.min(...this.coords.map(c=>c.lat))},
+        getEast(){return Math.max(...this.coords.map(c=>c.lng))},
+        getWest(){return Math.min(...this.coords.map(c=>c.lng))}
+    };
+}
+const map = {
+    setView(){return this},
+    setZoom(){return this},
+    getZoom(){return cameraZoom()},
+    fitBounds(){return this},
+    invalidateSize(){return this},
+    removeLayer(){return this},
+    getBounds(){return createBounds(appState.routeCoords.length?appState.routeCoords:[appState.userPos||{lat:50.06,lng:19.94}])}
+};
 
 const appState = {
     userPos: null,
@@ -67,8 +104,9 @@ const appState = {
     simulation: { active: false, timer: null, doneKm: 0, speedKmh: 70 },
     smoothNav: { raf: null, fromDoneKm: 0, toDoneKm: 0, startTime: 0, durationMs: 0, lastRenderDoneKm: null },
 };
+let routeCameras=[];
 
-let settings = { routeType: 'fast', cameraZoom: 16, speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: true, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
+let settings = { routeType: 'fast', cameraZoom: 16, speedAlertOver: 10, speedAlertEnabled: true, turnNotifyDistanceM: 500, cameraNotifyDistanceM: 500, voiceEnabled: true, isNightMode: true, carMode: false, mapTilesEnabled: false, trafficEnabled: false, favoritesCollapsed: false, searchHistoryCollapsed: false, poiFilters: {}, avoidTolls: false, avoidFerries: false, avoidHighways: false, avoidUnpaved: false };
 function saveSettings(){try{localStorage.setItem('naviSettings',JSON.stringify(settings))}catch(e){console.error("Failed to save settings:", e)}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem('naviSettings'));if(s){Object.assign(settings, s)}}catch(e){console.error("Failed to load settings:", e)}}
 loadSettings();
@@ -88,9 +126,9 @@ function bearingToArrow(b){return arrowChars[Math.round(b/45)%8]}
 let displayedBearing=0;
 function rotateMap(deg){
     let diff=deg-displayedBearing;if(diff>180)diff-=360;if(diff<-180)diff+=360;displayedBearing+=diff*0.25;if(displayedBearing>360)displayedBearing-=360;if(displayedBearing<0)displayedBearing+=360;
-    document.getElementById('map').style.transform = `rotate(${-displayedBearing}deg) scale(1)`;
+    renderRouteDataView();
 }
-function resetMapRotation(){displayedBearing=0;document.getElementById('map').style.transform='rotate(0deg) scale(1)'}
+function resetMapRotation(){displayedBearing=0;renderRouteDataView()}
 function isCarModeForced(){const p=new URLSearchParams(location.search);return p.get('car')==='1'||p.get('androidAuto')==='1'||p.get('aa')==='1'}
 function isCarModeActive(){return settings.carMode||isCarModeForced()}
 function applyCarMode(){const active=isCarModeActive();document.body.classList.toggle('car-mode',active);const toggle=document.getElementById('carModeToggle');if(toggle)toggle.classList.toggle('on',active)}
@@ -128,55 +166,43 @@ function getVoiceStatusText(){
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
 document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
-window.addEventListener('resize',debounce(()=>{map.invalidateSize({pan:false});if(appState.navigationActive)fitActiveRouteOverview(false)},250));
+window.addEventListener('resize',debounce(()=>{renderRouteDataView();if(appState.navigationActive)fitActiveRouteOverview(false)},250));
 let mapTilesLayer=null;
 function removeOnlineMapLayers(){
-    if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}
-    if(trafficLayer){map.removeLayer(trafficLayer);trafficLayer=null}
+    mapTilesLayer=null;
+    trafficLayer=null;
     if(trafficInterval){clearInterval(trafficInterval);trafficInterval=null}
 }
 function enterNavigationOfflineMode(){
     appState.offlineNavigation=true;
     removeOnlineMapLayers();
-    document.getElementById('map').style.background=settings.isNightMode?'#111318':'#dde5ef';
+    renderRouteDataView();
 }
 function exitNavigationOfflineMode(){
     appState.offlineNavigation=false;
-    if(settings.mapTilesEnabled)loadMapTiles();
-    if(settings.trafficEnabled)updateTrafficLayerStyle();
+    renderRouteDataView();
 }
-function loadMapTiles(){if(!settings.mapTilesEnabled||appState.offlineNavigation)return;if(mapTilesLayer)map.removeLayer(mapTilesLayer);mapTilesLayer=settings.isNightMode?L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map):L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map)}
+function loadMapTiles(){settings.mapTilesEnabled=false;renderRouteDataView()}
 loadMapTiles();
 
 let trafficLayer = null;
 let trafficInterval = null;
 
 function updateTrafficLayerStyle() {
-    if (trafficLayer) {
-        map.removeLayer(trafficLayer);
-        trafficLayer = null;
-        if (trafficInterval) clearInterval(trafficInterval);
-        trafficInterval = null;
-    }
-
-    if (settings.trafficEnabled && !appState.offlineNavigation) {
-        if (!CONFIG.hereApiKey) return; // Silently fail if no key
-        const style = settings.isNightMode ? 'normal.night' : 'normal.day';
-        trafficLayer = L.tileLayer(`https://{s}.traffic.maps.ls.hereapi.com/maptile/2.1/flowtile/newest/${style}/{z}/{x}/{y}/256/png8?apiKey=${CONFIG.hereApiKey}`, { subdomains: '1234', maxZoom: 20 });
-        trafficLayer.addTo(map);
-        trafficInterval = setInterval(() => trafficLayer.redraw(), 300000);
-    }
+    settings.trafficEnabled=false;
+    trafficLayer=null;
+    if(trafficInterval)clearInterval(trafficInterval);
+    trafficInterval=null;
 }
 
 function toggleTraffic() {
-    settings.trafficEnabled = !settings.trafficEnabled;
-    document.getElementById('trafficToggle').classList.toggle('on', settings.trafficEnabled);
+    settings.trafficEnabled = false;
     saveSettings();
-    updateTrafficLayerStyle();
+    alert('Tryb bez mapy nie pobiera warstw ruchu. Prowadzenie działa po zapisanej linii trasy.');
 }
-function toggleMapTiles(){settings.mapTilesEnabled=!settings.mapTilesEnabled;document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);if(settings.mapTilesEnabled)loadMapTiles();else{if(mapTilesLayer){map.removeLayer(mapTilesLayer);mapTilesLayer=null}document.getElementById('map').style.background=settings.isNightMode?'#111318':'#dde5ef'}saveSettings()}
+function toggleMapTiles(){settings.mapTilesEnabled=false;renderRouteDataView();saveSettings();alert('Mapa jest wyłączona. Aplikacja pokazuje zapisaną linię trasy i punkty.')}
 
-function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);loadMapTiles();if(settings.trafficEnabled){updateTrafficLayerStyle()}if(!settings.mapTilesEnabled||appState.offlineNavigation)document.getElementById('map').style.background=settings.isNightMode?'#111318':'#dde5ef';saveSettings()}
+function toggleDayNight(){settings.isNightMode=!settings.isNightMode;document.body.classList.toggle('day-mode',!settings.isNightMode);document.getElementById('dayNightToggle').classList.toggle('on',settings.isNightMode);renderRouteDataView();saveSettings()}
 function autoDayNight(){const h=new Date().getHours();const shouldBeNight=h<CONFIG.autoNightEnd||h>=CONFIG.autoNightStart;if(shouldBeNight!==settings.isNightMode)toggleDayNight()}
 setInterval(autoDayNight,60000);
 function createArrowIcon(bearing){return L.divIcon({className:'',html:'<svg class="user-arrow" viewBox="0 0 30 30" style="transform:rotate('+bearing+'deg)"><circle cx="15" cy="15" r="12" fill="#2979ff" stroke="white" stroke-width="2.5" opacity="0.95"/><polygon points="15,4 20,22 15,18 10,22" fill="white"/></svg>',iconSize:[30,30],iconAnchor:[15,15]})}
@@ -200,6 +226,80 @@ function haptic(pattern=35){try{if(navigator.vibrate)navigator.vibrate(pattern)}
 function readStoredJson(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
 function writeStoredJson(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(e){console.error("Failed to store JSON:",e);return false}}
 function normalizeImportedList(data){return Array.isArray(data)?data:(data&&Array.isArray(data.items)?data.items:[])}
+function getRouteBounds(coords){
+    const items=coords.filter(c=>c&&Number.isFinite(c.lat)&&Number.isFinite(c.lng));
+    if(!items.length)return null;
+    return items.reduce((b,c)=>({minLat:Math.min(b.minLat,c.lat),maxLat:Math.max(b.maxLat,c.lat),minLng:Math.min(b.minLng,c.lng),maxLng:Math.max(b.maxLng,c.lng)}),{minLat:items[0].lat,maxLat:items[0].lat,minLng:items[0].lng,maxLng:items[0].lng});
+}
+function projectRoutePoint(point,bounds,pad=8){
+    const latRange=Math.max(0.000001,bounds.maxLat-bounds.minLat);
+    const lngRange=Math.max(0.000001,bounds.maxLng-bounds.minLng);
+    return {
+        x:pad+((point.lng-bounds.minLng)/lngRange)*(100-pad*2),
+        y:pad+((bounds.maxLat-point.lat)/latRange)*(100-pad*2)
+    };
+}
+function routeSvgPoint(point,bounds){const p=projectRoutePoint(point,bounds);return `${p.x.toFixed(2)},${p.y.toFixed(2)}`}
+function getSavedRouteSnapshot(){
+    return {
+        savedAt:new Date().toISOString(),
+        destination:appState.destination,
+        destinationName:appState.destinationName,
+        routeCoords:appState.routeCoords,
+        routeCumulativeDists:appState.routeCumulativeDists,
+        totalRouteDist:appState.totalRouteDist,
+        routeInstructions:appState.routeInstructions,
+        poi:appState.routePOIs,
+        speedCameras:routeCameras,
+        userIncidents:appState.userIncidents,
+        selectedRouteData:appState.selectedRouteData
+    };
+}
+function saveRouteSnapshot(){if(appState.routeCoords.length)writeStoredJson('naviSavedRouteLine',getSavedRouteSnapshot())}
+function renderRouteDataView(){
+    const svg=document.getElementById('routeDataSvg');
+    const car=document.getElementById('routeDataCar');
+    if(!svg)return;
+    const coords=appState.routeCoords;
+    const bounds=getRouteBounds(coords);
+    svg.innerHTML='';
+    if(!bounds){
+        document.getElementById('routeDataMode').textContent='Brak zapisanej trasy';
+        document.getElementById('routeDataCoords').textContent='0 punktów linii';
+        document.getElementById('routeDataPoi').textContent='0 POI / 0 radarów';
+        if(car)car.style.display='none';
+        return;
+    }
+    const routePoints=coords.map(c=>routeSvgPoint(c,bounds)).join(' ');
+    const doneKm=appState.routeProgress.doneKm||0;
+    const doneCoords=coords.filter((_,i)=>(appState.routeCumulativeDists[i]||0)<=doneKm);
+    const donePoints=doneCoords.length>1?doneCoords.map(c=>routeSvgPoint(c,bounds)).join(' '):'';
+    svg.insertAdjacentHTML('beforeend',`<polyline points="${routePoints}" class="route-data-line route-data-line-bg"/>`);
+    svg.insertAdjacentHTML('beforeend',`<polyline points="${routePoints}" class="route-data-line"/>`);
+    if(donePoints)svg.insertAdjacentHTML('beforeend',`<polyline points="${donePoints}" class="route-data-line route-data-line-done"/>`);
+    const visiblePois=[
+        ...appState.routePOIs.filter(p=>settings.poiFilters[p.type]!==false),
+        ...(settings.poiFilters.camera!==false?routeCameras:[]),
+        ...appState.userIncidents
+    ].filter(p=>p.snapped||Number.isFinite(p.lat));
+    for(const poi of visiblePois){
+        const src=poi.snapped||poi;
+        const p=projectRoutePoint(src,bounds);
+        const cls=poi.type==='camera'?'route-data-point camera':'route-data-point';
+        svg.insertAdjacentHTML('beforeend',`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${poi.type==='camera'?2.4:1.8}" class="${cls}"><title>${poi.name||poi.type||'Punkt'}</title></circle>`);
+    }
+    const pos=appState.routeProgress.snapped||appState.userPos||coords[0];
+    if(car&&pos){
+        const p=projectRoutePoint(pos,bounds);
+        car.style.display='grid';
+        car.style.left=p.x+'%';
+        car.style.top=p.y+'%';
+        car.style.transform=`translate(-50%,-50%) rotate(${appState.currentBearing||0}deg)`;
+    }
+    document.getElementById('routeDataMode').textContent=appState.navigationActive?'Prowadzenie po zapisanej linii':'Trasa zapisana';
+    document.getElementById('routeDataCoords').textContent=`${coords.length} punktów linii`;
+    document.getElementById('routeDataPoi').textContent=`${appState.routePOIs.length} POI / ${routeCameras.length} radarów`;
+}
 
 function openSettingsSub() {
     document.getElementById('mainMenu').classList.remove('open');
@@ -356,31 +456,7 @@ function deleteUserIncident(timestamp){
 }
 
 function openOfflineMaps() {
-    document.getElementById('mainMenu').classList.remove('open');
-    const ssBody = document.getElementById('ssBody');
-    ssBody.innerHTML = '';
-    document.getElementById('ssTitle').textContent = 'Mapy offline';
-
-    const section = createDOMElement('div', { className: 'ss-section' });
-    section.append(createDOMElement('h4', { textContent: 'Dane mapy' }));
-    const stats = createDOMElement('div', { className: 'offline-stats', id: 'offlineStats', textContent: 'Sprawdzanie danych...' });
-    const downloadBtn = createDOMElement('button', { className: 'search-go', textContent: 'Pobierz widoczny obszar mapy' });
-    downloadBtn.onclick = () => downloadOfflineArea();
-    const clearBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Wyczyść cache kafelków' });
-    clearBtn.onclick = () => clearTileCache();
-    
-    const progressContainer = createDOMElement('div', { id: 'offlineProgressContainer', style: 'margin-top: 15px; display: none;' });
-    progressContainer.innerHTML = `
-        <div id="offlineProgressLabel">Pobieranie...</div>
-        <div style="background: #555; border-radius: 5px; padding: 2px; margin-top: 5px;">
-            <div id="offlineProgressBar" style="width: 0%; height: 10px; background: var(--primary); border-radius: 3px; transition: width 0.2s;"></div>
-        </div>
-    `;
-
-    section.append(stats, downloadBtn, clearBtn, progressContainer);
-    ssBody.append(section);
-    document.getElementById('settingsSub').classList.add('open');
-    refreshOfflineStats();
+    openRouteDataPanel();
 }
 
 function openAppStatusPanel(){
@@ -396,7 +472,7 @@ function openAppStatusPanel(){
         ['Dane OSM',osmText],
         ['Lektor',getVoiceStatusText()],
         ['PWA cache',swActive?'aktywny':'nieaktywny'],
-        ['Wersja cache','navi-app-v15']
+        ['Wersja cache','navi-app-v17']
     ];
     rows.forEach(([label,value])=>{
         const row=createDOMElement('div',{className:'ss-row'});
@@ -434,20 +510,18 @@ function refreshOfflineStats(){
         const el=document.getElementById('offlineStats');
         if(!el)return;
         const incidentCount=appState.userIncidents.length;
-        const regions=readStoredJson('naviOfflineRegions')||[];
-        const regionHtml=regions.length?regions.slice(0,3).map(r=>`<div>${r.name}: <b>${r.tileCount}</b> kafelków</div>`).join(''):'<div>Brak zapisanych obszarów</div>';
-        el.innerHTML=`<div>POI i fotoradary: <b>OpenStreetMap online</b></div><div>Moje zgłoszenia: <b>${incidentCount}</b></div><div id="tileCacheInfo">Cache kafelków: sprawdzanie...</div><div class="offline-regions">${regionHtml}</div>`;
-        requestTileCacheInfo();
+        const saved=readStoredJson('naviSavedRouteLine');
+        el.innerHTML=`<div>POI i fotoradary: <b>OpenStreetMap online</b></div><div>Moje zgłoszenia: <b>${incidentCount}</b></div><div>Zapisana linia: <b>${saved&&saved.routeCoords?saved.routeCoords.length:0}</b> punktów</div>`;
     });
 }
 
 function requestTileCacheInfo(){
-    if(!navigator.serviceWorker||!navigator.serviceWorker.controller){const el=document.getElementById('tileCacheInfo');if(el)el.textContent='Cache kafelków: service worker nieaktywny';return}
+    if(!navigator.serviceWorker||!navigator.serviceWorker.controller){const el=document.getElementById('tileCacheInfo');if(el)el.textContent='Cache aplikacji: service worker nieaktywny';return}
     const requestId='cache-info-'+Date.now();
     const handler=(event)=>{
         if(event.data.action==='cache-info'&&event.data.requestId===requestId){
             const el=document.getElementById('tileCacheInfo');
-            if(el)el.innerHTML=`Cache kafelków: <b>${event.data.tileCount}</b>`;
+            if(el)el.innerHTML='Cache aplikacji: <b>aktywny</b>';
             navigator.serviceWorker.removeEventListener('message',handler);
         }
     };
@@ -457,7 +531,7 @@ function requestTileCacheInfo(){
 
 function clearTileCache(){
     if(!navigator.serviceWorker||!navigator.serviceWorker.controller)return alert('Service Worker nie jest aktywny.');
-    if(!confirm('Wyczyścić pobrane kafelki map offline?'))return;
+    if(!confirm('Odświeżyć zapis aplikacji offline?'))return;
     const requestId='clear-tiles-'+Date.now();
     const handler=(event)=>{
         if(event.data.action==='tiles-cleared'&&event.data.requestId===requestId){
@@ -470,62 +544,8 @@ function clearTileCache(){
 }
 
 async function downloadOfflineArea() {
-    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
-        return alert('Service Worker nie jest aktywny. Tryb offline nie jest dostępny.');
-    }
-
-    const bounds = map.getBounds();
-    const minZoom = 10;
-    const maxZoom = 17; // Be careful, higher zoom levels mean exponentially more tiles.
-    const regionName = `Obszar_${new Date().toISOString().slice(0, 10)}_${Date.now().toString().slice(-4)}`;
-
-    const progressContainer = document.getElementById('offlineProgressContainer');
-    const progressBar = document.getElementById('offlineProgressBar');
-    const progressLabel = document.getElementById('offlineProgressLabel');
-
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressLabel.textContent = `Przygotowywanie do pobrania: ${regionName}`;
-
-    const tileUrls = [];
-    for (let z = minZoom; z <= maxZoom; z++) {
-        const minTile = latLonToTile(bounds.getNorthWest(), z);
-        const maxTile = latLonToTile(bounds.getSouthEast(), z);
-
-        for (let x = minTile.x; x <= maxTile.x; x++) {
-            for (let y = minTile.y; y <= maxTile.y; y++) {
-                // Add URLs for both day and night mode tiles
-                tileUrls.push(`https://a.tile.openstreetmap.org/${z}/${x}/${y}.png`);
-                tileUrls.push(`https://a.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`);
-            }
-        }
-    }
-
-    progressLabel.textContent = `Pobieranie ${tileUrls.length / 2} kafelków...`;
-
-    navigator.serviceWorker.controller.postMessage({
-        action: 'cache-tiles',
-        urls: tileUrls,
-        regionName: regionName,
-        meta: { minZoom, maxZoom, bounds: { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() } }
-    });
-
-    // Listen for progress updates from the Service Worker
-    const progressListener = (event) => {
-        if (event.data.action === 'cache-progress' && event.data.regionName === regionName) {
-            const progress = event.data.progress;
-            progressBar.style.width = `${progress}%`;
-            if (progress >= 100) {
-                progressLabel.textContent = 'Pobieranie zakończone!';
-                saveOfflineRegion(regionName,bounds,minZoom,maxZoom,tileUrls.length);
-                setTimeout(() => {
-                    progressContainer.style.display = 'none';
-                }, 2000);
-                navigator.serviceWorker.removeEventListener('message', progressListener);
-            }
-        }
-    };
-    navigator.serviceWorker.addEventListener('message', progressListener);
+    saveRouteSnapshot();
+    alert('Zapisano linię trasy, POI i fotoradary. Obrazy mapy nie są pobierane w tym trybie.');
 }
 
 function saveOfflineRegion(regionName,bounds,minZoom,maxZoom,tileCount){
@@ -637,7 +657,6 @@ function refreshApp(){
 }
 function showLoading(msg){let el=document.getElementById('loadingOverlay');if(!el){el=document.createElement('div');el.id='loadingOverlay';el.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:1400;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;flex-direction:column;gap:12px';el.innerHTML='<div style="width:40px;height:40px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite"></div><span id="loadingText"></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';document.body.appendChild(el)}document.getElementById('loadingText').textContent=msg||'Ładowanie...';el.style.display='flex'}
 function hideLoading(){const el=document.getElementById('loadingOverlay');if(el)el.style.display='none'}
-let routeCameras=[];
 let routePreviewPoiCache=new WeakMap();
 function distToRoute(lat,lng){return core.distToCoords(lat,lng,appState.routeCoords)}
 function snapToRoute(lat,lng){return core.projectPointToRoute(lat,lng,appState.routeCoords,appState.routeCumulativeDists).snapped}
@@ -743,6 +762,7 @@ async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
         setPoiStatus({state:(routeCameras.length||appState.routePOIs.length)?'ready':'empty',pois:appState.routePOIs.length,cameras:routeCameras.length,error:''});
         clearRoutePreviewCache();
         renderPOIMarkers();
+        saveRouteSnapshot();
         updateRouteStrip();
     }catch(e){
         setPoiStatus({state:'error',pois:0,cameras:0,error:e.message||'Błąd OSM'});
@@ -762,44 +782,14 @@ function createPoiIcon(poi) {
     return L.divIcon({className:'',html:`<div style="font-size:22px;text-shadow:0 1px 4px rgba(0,0,0,0.5)">${poi.icon || '📸'}</div>`,iconSize:[24,24],iconAnchor:[12,12]});
 }
 function renderPOIMarkers(){
-    appState.poiMarkers.forEach(m=>map.removeLayer(m));
     appState.poiMarkers=[];
-    const renderedCoords = new Set();
-
-    const allPois = [
-        ...appState.routePOIs.filter(p => settings.poiFilters[p.type] !== false), 
-        ...(settings.poiFilters['camera'] !== false ? routeCameras : []), 
-        ...appState.userIncidents];
-
-    for(const poi of allPois){
-        const coordKey = `${poi.lat.toFixed(4)},${poi.lng.toFixed(4)}`;
-        if (renderedCoords.has(coordKey)) continue;
-
-        const snapped=poi.snapped||snapToRoute(poi.lat,poi.lng);
-        const icon = createPoiIcon(poi);
-        const m=L.marker([snapped.lat,snapped.lng],{icon}).addTo(map);
-        const tooltipText = poi.limit ? `${poi.name} (${poi.limit} km/h)` : poi.name;
-        m.bindTooltip(tooltipText,{permanent:false,direction:'top',offset:[0,-8]});
-        appState.poiMarkers.push(m);
-        renderedCoords.add(coordKey);
-    }
+    renderRouteDataView();
 }
-function clearRoutePreviewMarkers(){appState.routePreviewPoiMarkers.forEach(m=>map.removeLayer(m));appState.routePreviewPoiMarkers=[]}
+function clearRoutePreviewMarkers(){appState.routePreviewPoiMarkers=[]}
 function renderRoutePreviewMarkers(route){
     clearRoutePreviewMarkers();
     if(!route||!route.geometry||!route.geometry.coordinates)return;
-    const coords=route.geometry.coordinates.map(c=>({lat:c[1],lng:c[0]}));
-    const previewPois=getRoutePreviewPois(route);
-    const renderedCoords=new Set();
-    for(const poi of previewPois){
-        const coordKey=`${poi.lat.toFixed(4)},${poi.lng.toFixed(4)}`;
-        if(renderedCoords.has(coordKey))continue;
-        const snapped=poi.snapped||snapToCoords(poi.lat,poi.lng,coords);
-        const marker=L.marker([snapped.lat,snapped.lng],{icon:createPoiIcon(poi),zIndexOffset:850}).addTo(map);
-        marker.bindTooltip(poi.limit?`${poi.name} (${poi.limit} km/h)`:poi.name,{permanent:false,direction:'top',offset:[0,-8]});
-        appState.routePreviewPoiMarkers.push(marker);
-        renderedCoords.add(coordKey);
-    }
+    appState.routePreviewPoiMarkers=getRoutePreviewPois(route);
 }
 function getRoutePreviewPois(route){
     if(!route||!route.geometry||!route.geometry.coordinates)return[];
@@ -878,6 +868,34 @@ function openRoutePointsPanel(){
     ssBody.append(section);
     document.getElementById('settingsSub').classList.add('open');
     renderPointList(list,buildActiveRoutePointItems());
+}
+function openRouteDataPanel(){
+    document.getElementById('mainMenu').classList.remove('open');
+    const ssBody=document.getElementById('ssBody');
+    ssBody.innerHTML='';
+    document.getElementById('ssTitle').textContent='Zapisana linia';
+    const saved=readStoredJson('naviSavedRouteLine');
+    const coords=appState.routeCoords.length?appState.routeCoords:(saved&&saved.routeCoords)||[];
+    const pois=appState.routePOIs.length?appState.routePOIs:(saved&&saved.poi)||[];
+    const cams=routeCameras.length?routeCameras:(saved&&saved.speedCameras)||[];
+    const section=createDOMElement('div',{className:'ss-section mobile-info-grid'});
+    [
+        ['Cel',appState.destinationName||(saved&&saved.destinationName)||'brak'],
+        ['Punkty linii',String(coords.length)],
+        ['Dystans',appState.totalRouteDist?fmtDist(appState.totalRouteDist):(saved&&saved.totalRouteDist?fmtDist(saved.totalRouteDist):'brak')],
+        ['POI',String(pois.length)],
+        ['Fotoradary',String(cams.length)],
+        ['Zapis',saved&&saved.savedAt?new Date(saved.savedAt).toLocaleString('pl-PL'):'brak']
+    ].forEach(([label,value])=>{
+        const row=createDOMElement('div',{className:'info-row'});
+        row.append(createDOMElement('span',{textContent:label}),createDOMElement('b',{textContent:value}));
+        section.append(row);
+    });
+    const saveBtn=createDOMElement('button',{className:'search-go',textContent:'Zapisz aktualną linię i punkty'});
+    saveBtn.onclick=()=>{saveRouteSnapshot();openRouteDataPanel()};
+    section.append(saveBtn);
+    ssBody.append(section);
+    document.getElementById('settingsSub').classList.add('open');
 }
 function openGpsDiagnostics(){
     document.getElementById('mainMenu').classList.remove('open');
@@ -981,18 +999,13 @@ function smoothSetView(pos,progress=appState.routeProgress,opts={}){
         resetMapRotation();
         if(previousMode!=='overview')fitActiveRouteOverview(true);
     }else{
-        map.invalidateSize({pan:false});
         rotateMap(typeof opts.bearing==='number'?opts.bearing:appState.currentBearing);
-        map.setView(camera.center,camera.zoom,{animate:false})
     }
+    renderRouteDataView();
 }
 function updateUserMarkerPosition(pos,bearing){
-    if(!appState.userMarker){
-        appState.userMarker=L.marker(pos,{icon:createArrowIcon(bearing),zIndexOffset:1000}).addTo(map);
-    }else{
-        appState.userMarker.setLatLng(pos);
-        appState.userMarker.setIcon(createArrowIcon(bearing));
-    }
+    appState.userMarker={pos,bearing};
+    renderRouteDataView();
 }
 function renderSmoothNavigation(doneKm){
     const p=pointAtRouteDistance(doneKm);
@@ -1060,7 +1073,7 @@ function processGpsPosition(pos){
         updateUserMarkerPosition(displayPos,appState.currentBearing);
     }
     if(!appState.gpsCentered){appState.gpsCentered=true;map.invalidateSize({pan:false});map.setView(displayPos,cameraZoom())}
-    if(appState.navigationActive){checkRouteProximity(lat,lng);startSmoothNavigation(appState.routeProgress);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip()}
+    if(appState.navigationActive){checkRouteProximity(lat,lng);startSmoothNavigation(appState.routeProgress);checkSpeedCameras(lat,lng,appState.currentSpeed);updateRouteStrip();renderRouteDataView()}
     document.getElementById('scCurrent').textContent=Math.round(appState.currentSpeed);
     document.getElementById('sbTime').textContent=new Date().getHours().toString().padStart(2,'0')+':'+new Date().getMinutes().toString().padStart(2,'0')
 }
@@ -1571,6 +1584,7 @@ function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
             destinationName: appState.destinationName,
             routeData: selectedRoute
         }));
+        saveRouteSnapshot();
     } catch (e) {
         console.error("Failed to save route for offline navigation:", e);
     }
@@ -1591,6 +1605,7 @@ function selectRoute(routeIndex, routes = appState.alternativeRoutes) {
     appState.smoothNav.lastRenderDoneKm=null;
     resetMapRotation();
     fitActiveRouteOverview(false);
+    renderRouteDataView();
     if (!appState.isRerouting) { // Don't repeat "Navigation started" on reroute
         speak('Nawigacja uruchomiona. Kieruj się do ' + appState.destinationName);
     }
@@ -1641,7 +1656,7 @@ function stopNav(){
     cancelSmoothNavigation();
     exitNavigationOfflineMode();
     Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'idle',junctionFocusDoneKm:null,lastMapViewPos:null,lastMapViewTime:0,smoothNav:{raf:null,fromDoneKm:0,toDoneKm:0,startTime:0,durationMs:0,lastRenderDoneKm:null},poiStatus:{state:'idle',cameras:0,pois:0,error:'',updated:0},poiLoadSeq:appState.poiLoadSeq+1});
-    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');resetMapRotation();['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel','osmStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
+    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();appState.routeLine=null;appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');resetMapRotation();renderRouteDataView();['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel','osmStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 
 let favorites = [];
@@ -1804,6 +1819,8 @@ function resumeLastRoute(savedRoute) {
     appState.smoothNav.lastRenderDoneKm=null;
     resetMapRotation();
     fitActiveRouteOverview(false);
+    saveRouteSnapshot();
+    renderRouteDataView();
     
     closeMainMenu();
     speak('Wznowiono nawigację do: ' + appState.destinationName);
@@ -1815,11 +1832,11 @@ function initApp() {
     applyCarMode();
     syncVoiceButtons();
     setTimeout(()=>showVoiceUnlock(),600);
-    document.getElementById('mapTilesToggle').classList.toggle('on',settings.mapTilesEnabled);
-    document.getElementById('trafficToggle').classList.toggle('on',settings.trafficEnabled);
     document.querySelector('.mm-favorites').classList.toggle('collapsed', settings.favoritesCollapsed);
     document.getElementById('searchHistorySection').classList.toggle('collapsed', settings.searchHistoryCollapsed);
-    if(settings.trafficEnabled)updateTrafficLayerStyle();
+    settings.mapTilesEnabled=false;
+    settings.trafficEnabled=false;
+    renderRouteDataView();
 
     const savedRouteRaw = localStorage.getItem('naviLastRoute');
     // Clear any incomplete offline downloads on startup

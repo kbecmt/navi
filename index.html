@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Nawigacja GPS</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 <link rel="stylesheet" href="style.css"/>
 <link rel="manifest" href="manifest.json"/>
 <meta name="theme-color" content="#2979ff"/>
@@ -14,8 +12,18 @@
 </head>
 <body onload="initApp()">
 
-<!-- ===== MAP ===== -->
-<div id="map"></div>
+<!-- ===== ROUTE DATA VIEW ===== -->
+<div id="map" aria-label="Zapisana linia trasy">
+    <div id="routeDataView">
+        <svg id="routeDataSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+        <div id="routeDataCar">▲</div>
+        <div id="routeDataStats">
+            <b id="routeDataMode">Trasa zapisana</b>
+            <span id="routeDataCoords">0 punktów linii</span>
+            <span id="routeDataPoi">0 POI / 0 radarów</span>
+        </div>
+    </div>
+</div>
 
 <!-- ===== TOP NAV BAR ===== -->
 <div id="topBar">
@@ -174,7 +182,7 @@
         <div class="mm-item" onclick="openTripHistoryPanel()"><span class="mm-icon">▦</span><span class="mm-label">Historia przejazdów</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="toggleSimulation();closeMainMenu()"><span class="mm-icon">▶</span><span class="mm-label" id="simulationMenuLabel">Symuluj trasę</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openUserIncidentsPanel()"><span class="mm-icon">📢</span><span class="mm-label">Moje zgłoszenia</span><span class="mm-arrow">›</span></div>
-        <div class="mm-item" onclick="openOfflineMaps()"><span class="mm-icon">📥</span><span class="mm-label">Mapy offline</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openRouteDataPanel()"><span class="mm-icon">📥</span><span class="mm-label">Zapis trasy offline</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openAppStatusPanel()"><span class="mm-icon">◎</span><span class="mm-label">Status aplikacji</span><span class="mm-arrow">›</span></div>
         <div class="mm-toggle-row">
             <span>🌙 Tryb nocny</span>
@@ -189,14 +197,7 @@
             <div class="mm-toggle on" id="voiceToggle" onclick="toggleVoice()"></div>
         </div>
         <div class="mm-item" onclick="testMobileSound()"><span class="mm-icon">🔈</span><span class="mm-label">Włącz lektora Chrome</span><span class="mm-arrow">›</span></div>
-        <div class="mm-toggle-row">
-            <span>🗺️ Obrazy mapy</span>
-            <div class="mm-toggle on" id="mapTilesToggle" onclick="toggleMapTiles()"></div>
-        </div>
-        <div class="mm-toggle-row">
-            <span>🚦 Natężenie ruchu</span>
-            <div class="mm-toggle" id="trafficToggle" onclick="toggleTraffic()"></div>
-        </div>
+        <div class="mm-item" onclick="openRouteDataPanel()"><span class="mm-icon">〽</span><span class="mm-label">Zapisana linia i punkty</span><span class="mm-arrow">›</span></div>
     </div>
     <div class="mm-item mm-item-danger" onclick="stopNav();closeMainMenu()"><span class="mm-icon">🚫</span><span class="mm-label">Zakończ nawigację</span><span class="mm-arrow">›</span></div>
 </div>
@@ -270,8 +271,6 @@
     <button class="ts-close" onclick="closeTripSummary()">Zakończ</button>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <script src="navi-core.js"></script>
 <script src="app.js"></script>
 </body>
