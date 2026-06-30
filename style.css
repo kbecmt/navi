@@ -1998,6 +1998,184 @@ body.car-mode #dest {
     }
 }
 
+@media (orientation: landscape) and (max-height: 620px) {
+    #topBar,
+    body.car-mode #topBar {
+        right: calc(38px + env(safe-area-inset-right));
+        padding: calc(4px + env(safe-area-inset-top)) 8px 4px calc(8px + env(safe-area-inset-left));
+        background: linear-gradient(135deg, rgba(23, 163, 74, 0.46), rgba(22, 150, 66, 0.34));
+        box-shadow: 0 4px 12px rgba(11, 18, 32, 0.1);
+    }
+
+    .nav-row {
+        gap: 7px;
+    }
+
+    .turn-arrow,
+    body.car-mode .turn-arrow {
+        width: 34px;
+        min-width: 34px;
+        height: 34px;
+        font-size: 22px;
+    }
+
+    .nav-dist,
+    body.car-mode .nav-dist {
+        font-size: 20px;
+    }
+
+    .nav-dist-unit,
+    body.car-mode .nav-dist-unit {
+        font-size: 12px;
+    }
+
+    .nav-street,
+    body.car-mode .nav-street {
+        max-width: 44vw;
+        font-size: 12px;
+    }
+
+    #nextTurnHint,
+    #laneBar,
+    body.car-mode #nextTurnHint {
+        display: none !important;
+    }
+
+    #rightSidebar,
+    body.car-mode #rightSidebar {
+        width: 34px;
+        padding: calc(48px + env(safe-area-inset-top)) 0 calc(16px + env(safe-area-inset-bottom));
+        background: linear-gradient(180deg, rgba(12, 16, 24, 0.12), rgba(12, 16, 24, 0.03));
+        backdrop-filter: blur(8px);
+    }
+
+    .sidebar-time,
+    .sidebar-eta-row {
+        display: none;
+    }
+
+    .sidebar-strip {
+        margin: 4px 0;
+    }
+
+    .sidebar-strip-track {
+        width: 3px;
+        background: rgba(255, 255, 255, 0.12);
+    }
+
+    .sidebar-strip-marker {
+        width: 15px;
+        height: 15px;
+        font-size: 10px;
+    }
+
+    .sidebar-strip-marker .icon-dot {
+        min-width: 14px;
+        height: 14px;
+        border-width: 0;
+        background: rgba(20, 24, 32, 0.5);
+        font-size: 9px;
+    }
+
+    .sidebar-bottom-icons {
+        display: none;
+    }
+
+    #speedCluster,
+    body.car-mode #speedCluster {
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        left: calc(8px + env(safe-area-inset-left));
+        transform-origin: bottom left;
+    }
+
+    .sc-ring,
+    body.car-mode .sc-ring {
+        width: 52px;
+        height: 52px;
+        border-width: 3px;
+        background: rgba(12, 16, 24, 0.58);
+    }
+
+    .sc-current,
+    body.car-mode .sc-current {
+        font-size: 20px;
+    }
+
+    .sc-unit {
+        font-size: 9px;
+    }
+
+    .sc-limit,
+    body.car-mode .sc-limit {
+        width: 26px;
+        height: 26px;
+        border-width: 2px;
+        font-size: 12px;
+    }
+
+    #speedBar,
+    body.car-mode #speedBar {
+        right: calc(42px + env(safe-area-inset-right));
+        bottom: calc(6px + env(safe-area-inset-bottom));
+        left: calc(70px + env(safe-area-inset-left));
+        width: auto;
+        padding: 4px 8px;
+        border: 1px solid var(--border-dark);
+        border-radius: 12px;
+        background: rgba(28, 31, 38, 0.48);
+        box-shadow: none;
+        transform: translateY(130%);
+    }
+
+    #speedBar.show {
+        transform: translateY(0);
+    }
+
+    body.day-mode #speedBar {
+        border-color: var(--border);
+        background: rgba(255, 255, 255, 0.5);
+    }
+
+    .sb-row,
+    body.car-mode .sb-row {
+        min-height: 34px;
+        gap: 8px;
+        padding-right: 34px;
+        font-size: 12px;
+    }
+
+    #statDist,
+    #statDur,
+    #statArrival {
+        font-size: 12px !important;
+    }
+
+    .sb-close {
+        position: absolute;
+        right: 6px;
+        width: 30px;
+        min-width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        font-size: 16px;
+    }
+
+    #mobileNavActions,
+    body.car-mode #mobileNavActions,
+    body.car-mode #mobileNavActions.show {
+        display: none !important;
+    }
+
+    #persistentMenu {
+        right: calc(8px + env(safe-area-inset-right));
+        bottom: calc(8px + env(safe-area-inset-bottom));
+        width: 42px;
+        height: 42px;
+        font-size: 20px;
+        opacity: 0.82;
+    }
+}
+
 @media (max-width: 520px) {
     :root {
         --panel-radius: 16px;
