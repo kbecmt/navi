@@ -353,20 +353,8 @@ function openOfflineMaps() {
     document.getElementById('ssTitle').textContent = 'Mapy offline';
 
     const section = createDOMElement('div', { className: 'ss-section' });
-    section.append(createDOMElement('h4', { textContent: 'Dane lokalne' }));
+    section.append(createDOMElement('h4', { textContent: 'Dane mapy' }));
     const stats = createDOMElement('div', { className: 'offline-stats', id: 'offlineStats', textContent: 'Sprawdzanie danych...' });
-    const importCameras = createDOMElement('input', { className: 'hidden-file-input', attributes: { type: 'file', id: 'importCamerasInput', accept: 'application/json,.json' } });
-    const importPois = createDOMElement('input', { className: 'hidden-file-input', attributes: { type: 'file', id: 'importPoisInput', accept: 'application/json,.json' } });
-    importCameras.onchange = e => importLocalDataFile(e.target.files[0], 'speedCameras');
-    importPois.onchange = e => importLocalDataFile(e.target.files[0], 'fallbackPOIs');
-    const importRow = createDOMElement('div', { className: 'offline-actions' });
-    const importCamBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Importuj fotoradary' });
-    importCamBtn.onclick = () => importCameras.click();
-    const importPoiBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Importuj POI' });
-    importPoiBtn.onclick = () => importPois.click();
-    const resetImportBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Przywróć dane domyślne' });
-    resetImportBtn.onclick = resetImportedData;
-    importRow.append(importCamBtn, importPoiBtn, resetImportBtn);
     const downloadBtn = createDOMElement('button', { className: 'search-go', textContent: 'Pobierz widoczny obszar mapy' });
     downloadBtn.onclick = () => downloadOfflineArea();
     const clearBtn = createDOMElement('button', { className: 'add-fav-btn', textContent: 'Wyczyść cache kafelków' });
@@ -380,54 +368,34 @@ function openOfflineMaps() {
         </div>
     `;
 
-    section.append(stats, importCameras, importPois, importRow, downloadBtn, clearBtn, progressContainer);
+    section.append(stats, downloadBtn, clearBtn, progressContainer);
     ssBody.append(section);
     document.getElementById('settingsSub').classList.add('open');
     refreshOfflineStats();
 }
 
 function importLocalDataFile(file,type){
-    if(!file)return;
-    const reader=new FileReader();
-    reader.onload=()=>{
-        try{
-            const data=normalizeImportedList(JSON.parse(reader.result));
-            if(!data.length)return alert('Plik nie zawiera listy punktów.');
-            if(type==='speedCameras'){writeStoredJson('naviImportedSpeedCameras',data);window.speedCameras=data}
-            else{writeStoredJson('naviImportedFallbackPOIs',data);window.fallbackPOIs=data}
-            clearRoutePreviewCache();
-            if(appState.routeCoords.length)loadRouteCameras();
-            if(appState.alternativeRoutes.length)renderRouteChoiceSummaries(appState.alternativeRoutes);
-            refreshOfflineStats();
-        }catch(e){alert('Nie udało się odczytać pliku JSON.')}
-    };
-    reader.readAsText(file);
+    alert('POI i fotoradary są pobierane wyłącznie z OpenStreetMap.');
 }
 
 function resetImportedData(){
     localStorage.removeItem('naviImportedSpeedCameras');
     localStorage.removeItem('naviImportedFallbackPOIs');
-    window.speedCameras=null;
-    window.fallbackPOIs=null;
+    window.speedCameras=[];
+    window.fallbackPOIs=[];
     clearRoutePreviewCache();
-    loadExternalData(true).then(()=>{
-        if(appState.routeCoords.length)loadRouteCameras();
-        refreshOfflineStats();
-    });
+    if(appState.routeCoords.length)loadRouteCameras();
+    refreshOfflineStats();
 }
 
 function refreshOfflineStats(){
     loadExternalData().then(()=>{
         const el=document.getElementById('offlineStats');
         if(!el)return;
-        const cameraCount=(window.speedCameras||[]).length;
-        const poiCount=(window.fallbackPOIs||[]).length;
         const incidentCount=appState.userIncidents.length;
         const regions=readStoredJson('naviOfflineRegions')||[];
-        const importedCameras=!!localStorage.getItem('naviImportedSpeedCameras');
-        const importedPois=!!localStorage.getItem('naviImportedFallbackPOIs');
         const regionHtml=regions.length?regions.slice(0,3).map(r=>`<div>${r.name}: <b>${r.tileCount}</b> kafelków</div>`).join(''):'<div>Brak zapisanych obszarów</div>';
-        el.innerHTML=`<div>Fotoradary: <b>${cameraCount}</b>${importedCameras?' import':''}</div><div>POI: <b>${poiCount}</b>${importedPois?' import':''}</div><div>Moje zgłoszenia: <b>${incidentCount}</b></div><div id="tileCacheInfo">Cache kafelków: sprawdzanie...</div><div class="offline-regions">${regionHtml}</div>`;
+        el.innerHTML=`<div>POI i fotoradary: <b>OpenStreetMap online</b></div><div>Moje zgłoszenia: <b>${incidentCount}</b></div><div id="tileCacheInfo">Cache kafelków: sprawdzanie...</div><div class="offline-regions">${regionHtml}</div>`;
         requestTileCacheInfo();
     });
 }
@@ -599,7 +567,6 @@ function setRouteType(type, clickedElement) {
 }
 function showLoading(msg){let el=document.getElementById('loadingOverlay');if(!el){el=document.createElement('div');el.id='loadingOverlay';el.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:1400;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;flex-direction:column;gap:12px';el.innerHTML='<div style="width:40px;height:40px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite"></div><span id="loadingText"></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';document.body.appendChild(el)}document.getElementById('loadingText').textContent=msg||'Ładowanie...';el.style.display='flex'}
 function hideLoading(){const el=document.getElementById('loadingOverlay');if(el)el.style.display='none'}
-let speedCameras=[];
 let routeCameras=[];
 let routePreviewPoiCache=new WeakMap();
 function distToRoute(lat,lng){return core.distToCoords(lat,lng,appState.routeCoords)}
@@ -611,7 +578,7 @@ function nearestRouteIndex(lat,lng,startIndex=0){return core.nearestRouteIndex(l
 function projectGpsToRoute(lat,lng){if(appState.routeCumulativeDists.length!==appState.routeCoords.length)rebuildRouteMetrics();return core.projectPointToRoute(lat,lng,appState.routeCoords,appState.routeCumulativeDists)}
 function clearRoutePreviewCache(){routePreviewPoiCache=new WeakMap()}
 function withRouteDistance(poi,coords=appState.routeCoords,cumulative=appState.routeCumulativeDists){const p=core.projectPointToRoute(poi.lat,poi.lng,coords,cumulative);return{...poi,routeDoneKm:p.doneKm,snapped:p.snapped,distanceFromRoute:p.distanceFromRoute}}
-function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.05;routeCameras=(window.speedCameras||[]).filter(cam=>cam.lat>=minLat-margin&&cam.lat<=maxLat+margin&&cam.lng>=minLng-margin&&cam.lng<=maxLng+margin).map(cam=>withRouteDistance(cam)).filter(cam=>cam.distanceFromRoute<0.5);appState.userIncidents=appState.userIncidents.map(incident=>withRouteDistance(incident));loadOSMPOIs(minLat,maxLat,minLng,maxLng)}
+function loadRouteCameras(){if(!appState.routeCoords.length)return;let minLat=90,maxLat=-90,minLng=180,maxLng=-180;for(const c of appState.routeCoords){if(c.lat<minLat)minLat=c.lat;if(c.lat>maxLat)maxLat=c.lat;if(c.lng<minLng)minLng=c.lng;if(c.lng>maxLng)maxLng=c.lng}const margin=0.05;routeCameras=[];appState.routePOIs=[];renderPOIMarkers();appState.userIncidents=appState.userIncidents.map(incident=>withRouteDistance(incident));loadOSMPOIs(minLat-margin,maxLat+margin,minLng-margin,maxLng+margin)}
 const osmTypeMap={
     'brand_Orlen': { icon: 'OR', type: 'fuel', style: { backgroundColor: '#e11b22', color: 'white' } },
     'brand_Shell': { icon: 'SH', type: 'fuel', style: { backgroundColor: '#ffdd00', color: '#d90f17' } },
@@ -630,7 +597,6 @@ const osmTypeMap={
     highway_traffic_signals:{icon:'🚦',type:'traffic'},
     'barrier_toll_booth':{icon:'💰',type:'danger'}
 };
-let fallbackPOIs = [];
 function buildOverpassQuery(minLat,maxLat,minLng,maxLng){
     const bbox=`${minLat},${minLng},${maxLat},${maxLng}`;
     return `[out:json][timeout:18];(
@@ -692,8 +658,7 @@ async function fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng){
 }
 async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
     const seq=++appState.poiLoadSeq;
-    const fallbackOnRoute=(window.fallbackPOIs||[]).map(p=>withRouteDistance(p)).filter(p=>p.distanceFromRoute<0.5);
-    appState.routePOIs=uniquePoiList(fallbackOnRoute);
+    appState.routePOIs=[];
     renderPOIMarkers();
     try{
         const online=await fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng);
@@ -701,8 +666,8 @@ async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
         const enriched=online.map(p=>withRouteDistance(p)).filter(p=>p.distanceFromRoute<0.5);
         const onlineCameras=enriched.filter(p=>p.type==='camera');
         const onlinePois=enriched.filter(p=>p.type!=='camera');
-        routeCameras=uniquePoiList([...routeCameras,...onlineCameras]).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
-        appState.routePOIs=uniquePoiList([...fallbackOnRoute,...onlinePois]).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
+        routeCameras=uniquePoiList(onlineCameras).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
+        appState.routePOIs=uniquePoiList(onlinePois).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
         clearRoutePreviewCache();
         renderPOIMarkers();
         updateRouteStrip();
@@ -768,8 +733,6 @@ function getRoutePreviewPois(route){
     const coords=route.geometry.coordinates.map(c=>({lat:c[1],lng:c[0]}));
     const metrics=core.buildCumulativeDists(coords);
     const pois=[
-        ...(settings.poiFilters['camera']!==false?(window.speedCameras||[]):[]),
-        ...(window.fallbackPOIs||[]).filter(p=>settings.poiFilters[p.type]!==false),
         ...appState.userIncidents
     ].map(p=>withRouteDistance(p,coords,metrics.cumulative))
      .filter(p=>p.distanceFromRoute<0.5)
@@ -1203,22 +1166,9 @@ function startNav() {
 }
 async function loadExternalData(forceReload=false) {
     if(forceReload)clearRoutePreviewCache();
-    if (!forceReload && window.speedCameras && window.fallbackPOIs) return; // Already loaded
-    const importedCameras=readStoredJson('naviImportedSpeedCameras');
-    const importedPois=readStoredJson('naviImportedFallbackPOIs');
-    try {
-        const [camData, poiData] = await Promise.all([
-            importedCameras || fetch('speed_cameras.json').then(r=>r.json()),
-            importedPois || fetch('fallback_pois.json').then(r=>r.json())
-        ]);
-        window.speedCameras = normalizeImportedList(camData);
-        window.fallbackPOIs = normalizeImportedList(poiData);
-        clearRoutePreviewCache();
-    } catch (e) {
-        console.error("Failed to load POI data", e);
-        window.speedCameras = [];
-        window.fallbackPOIs = [];
-    }
+    window.speedCameras = [];
+    window.fallbackPOIs = [];
+    clearRoutePreviewCache();
 }
 
 async function drawRoute() {
