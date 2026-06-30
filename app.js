@@ -48,6 +48,7 @@ const appState = {
     routePOIs: [],
     poiMarkers: [],
     poiLoadSeq: 0,
+    poiStatus: { state: 'idle', cameras: 0, pois: 0, error: '', updated: 0 },
     spoken500m: new Set(),
     spokenCameras500m: new Set(),
     currentSpeedLimit: 0,
@@ -116,6 +117,12 @@ function showVoiceUnlock(force=false){const el=document.getElementById('voiceUnl
 function hideVoiceUnlock(){const el=document.getElementById('voiceUnlockPanel');if(el)el.classList.remove('show')}
 function dismissVoiceUnlock(){voiceUnlockDismissed=true;hideVoiceUnlock()}
 function testMobileSound(){settings.voiceEnabled=true;voiceUnlockDismissed=false;syncVoiceButtons();saveSettings();speechQueue=[];speechBusy=false;clearTimeout(speechWatchdog);speechWatchdog=null;if(canUseSpeech())window.speechSynthesis.cancel();speechUnlocked=false;const ok=unlockSpeech();playBeep(660,0.12);if(!ok){showVoiceToast('Ta przeglądarka nie obsługuje lektora');showVoiceUnlock(true);return}markVoiceConfirmedSession();hideVoiceUnlock();speechQueue=['Lektor włączony. Powiadomienia głosowe działają.'];processSpeechQueue()}
+function getVoiceStatusText(){
+    if(!settings.voiceEnabled)return'Lektor wyłączony';
+    if(!canUseSpeech())return'Lektor niedostępny w tej przeglądarce';
+    if(isTouchDevice()&&!isVoiceConfirmedSession())return'Kliknij Włącz głos';
+    return'Głos działa';
+}
 if(window.speechSynthesis){refreshVoices();window.speechSynthesis.onvoiceschanged=refreshVoices}
 document.addEventListener('touchstart',unlockSpeech,{once:true,passive:true});document.addEventListener('click',unlockSpeech,{once:true});document.addEventListener('pointerdown',unlockAudio,{once:true,passive:true});
 setInterval(()=>{try{if(window.speechSynthesis&&!window.speechSynthesis.speaking)window.speechSynthesis.resume()}catch(e){}},CONFIG.speechResumeInterval);
@@ -374,6 +381,38 @@ function openOfflineMaps() {
     refreshOfflineStats();
 }
 
+function openAppStatusPanel(){
+    document.getElementById('mainMenu').classList.remove('open');
+    const ssBody=document.getElementById('ssBody');
+    ssBody.innerHTML='';
+    document.getElementById('ssTitle').textContent='Status aplikacji';
+    const section=createDOMElement('div',{className:'ss-section'});
+    const osm=appState.poiStatus;
+    const osmText=osm.state==='ready'?`${osm.pois||0} POI, ${osm.cameras||0} radarów`:osm.state==='loading'?'ładowanie':osm.state==='error'?`błąd: ${osm.error||'OSM'}`:osm.state==='empty'?'brak punktów na trasie':'bez aktywnej trasy';
+    const swActive=!!(navigator.serviceWorker&&navigator.serviceWorker.controller);
+    const rows=[
+        ['Dane OSM',osmText],
+        ['Lektor',getVoiceStatusText()],
+        ['PWA cache',swActive?'aktywny':'nieaktywny'],
+        ['Wersja cache','navi-app-v14']
+    ];
+    rows.forEach(([label,value])=>{
+        const row=createDOMElement('div',{className:'ss-row'});
+        row.append(createDOMElement('span',{textContent:label}),createDOMElement('b',{textContent:value}));
+        section.append(row);
+    });
+    const refreshBtn=createDOMElement('button',{className:'search-go',textContent:'Odśwież aplikację'});
+    refreshBtn.onclick=refreshApp;
+    section.append(refreshBtn);
+    if(settings.voiceEnabled&&!isVoiceConfirmedSession()&&canUseSpeech()){
+        const voiceBtn=createDOMElement('button',{className:'add-fav-btn',textContent:'Włącz głos'});
+        voiceBtn.onclick=testMobileSound;
+        section.append(voiceBtn);
+    }
+    ssBody.append(section);
+    document.getElementById('settingsSub').classList.add('open');
+}
+
 function importLocalDataFile(file,type){
     alert('POI i fotoradary są pobierane wyłącznie z OpenStreetMap.');
 }
@@ -565,6 +604,35 @@ function setRouteType(type, clickedElement) {
     settings.routeType = type;
     saveSettings();
 }
+function setPoiStatus(status){
+    appState.poiStatus={...appState.poiStatus,...status,updated:status.updated||Date.now()};
+    renderPoiStatus();
+}
+function renderPoiStatus(){
+    const el=document.getElementById('osmStatus');
+    if(!el)return;
+    const s=appState.poiStatus;
+    el.className='';
+    if(!appState.navigationActive&&s.state==='idle'){el.classList.remove('show');return}
+    let text='OSM: —';
+    if(s.state==='loading')text='OSM: ładowanie...';
+    else if(s.state==='ready')text=`OSM: ${s.pois||0} POI, ${s.cameras||0} radarów`;
+    else if(s.state==='error')text='OSM: błąd pobierania';
+    else if(s.state==='empty')text='OSM: brak punktów';
+    el.textContent=text;
+    el.classList.toggle('error',s.state==='error');
+    el.classList.add('show');
+}
+function refreshApp(){
+    try{
+        if('serviceWorker'in navigator){
+            navigator.serviceWorker.getRegistration().then(reg=>{
+                if(reg)reg.update().finally(()=>location.reload());
+                else location.reload();
+            }).catch(()=>location.reload());
+        }else location.reload();
+    }catch(e){location.reload()}
+}
 function showLoading(msg){let el=document.getElementById('loadingOverlay');if(!el){el=document.createElement('div');el.id='loadingOverlay';el.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:1400;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:700;flex-direction:column;gap:12px';el.innerHTML='<div style="width:40px;height:40px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite"></div><span id="loadingText"></span><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';document.body.appendChild(el)}document.getElementById('loadingText').textContent=msg||'Ładowanie...';el.style.display='flex'}
 function hideLoading(){const el=document.getElementById('loadingOverlay');if(el)el.style.display='none'}
 let routeCameras=[];
@@ -659,6 +727,8 @@ async function fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng){
 async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
     const seq=++appState.poiLoadSeq;
     appState.routePOIs=[];
+    routeCameras=[];
+    setPoiStatus({state:'loading',pois:0,cameras:0,error:''});
     renderPOIMarkers();
     try{
         const online=await fetchOnlineRoutePOIs(minLat,maxLat,minLng,maxLng);
@@ -668,10 +738,12 @@ async function loadOSMPOIs(minLat,maxLat,minLng,maxLng){
         const onlinePois=enriched.filter(p=>p.type!=='camera');
         routeCameras=uniquePoiList(onlineCameras).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
         appState.routePOIs=uniquePoiList(onlinePois).sort((a,b)=>(a.routeDoneKm||0)-(b.routeDoneKm||0));
+        setPoiStatus({state:(routeCameras.length||appState.routePOIs.length)?'ready':'empty',pois:appState.routePOIs.length,cameras:routeCameras.length,error:''});
         clearRoutePreviewCache();
         renderPOIMarkers();
         updateRouteStrip();
     }catch(e){
+        setPoiStatus({state:'error',pois:0,cameras:0,error:e.message||'Błąd OSM'});
         console.warn('Online POI load failed',e);
     }
 }
@@ -1050,7 +1122,8 @@ function checkRouteProximity(lat, lng) {
         const now = Date.now();
         if (now - appState.lastOffRouteWarn > CONFIG.offRouteWarnCooldown) {
             appState.lastOffRouteWarn = now;
-            speak("Zboczyłeś z trasy. Wróć do zaznaczonej trasy.");
+            speak("Zboczyłeś z trasy. Przeliczam trasę.");
+            reroute();
         }
         return;
     }
@@ -1174,14 +1247,7 @@ async function loadExternalData(forceReload=false) {
 
 async function drawRoute() {
     if (appState.routeLine) { map.removeLayer(appState.routeLine); appState.routeLine = null; }
-    const exclude = [];
-    if (settings.avoidTolls) exclude.push('toll');
-    if (settings.avoidFerries) exclude.push('ferry');
-    if (settings.avoidHighways) exclude.push('motorway');
-    const coords = `${appState.userPos.lng},${appState.userPos.lat};${appState.destination.lng},${appState.destination.lat}`;
-    let url = `${CONFIG.osrmUrl}/${coords}?overview=full&geometries=geojson&steps=true&annotations=true&alternatives=true`;
-    if (exclude.length) url += `&exclude=${exclude.join(',')}`;
-    if (settings.routeType === 'short' || settings.routeType === 'eco') url += '&weight=shortest';
+    const url = buildRouteUrl(appState.userPos, appState.destination);
 
     try {
         const response = await fetch(url);
@@ -1284,9 +1350,35 @@ async function fetchTrafficIncidents() {
     appState.trafficIncidents = [];
 }
 
+function buildRouteUrl(fromLatLng,toLatLng){
+    const exclude = [];
+    if (settings.avoidTolls) exclude.push('toll');
+    if (settings.avoidFerries) exclude.push('ferry');
+    if (settings.avoidHighways) exclude.push('motorway');
+    const coords = `${fromLatLng.lng},${fromLatLng.lat};${toLatLng.lng},${toLatLng.lat}`;
+    let url = `${CONFIG.osrmUrl}/${coords}?overview=full&geometries=geojson&steps=true&annotations=true&alternatives=true`;
+    if (exclude.length) url += `&exclude=${exclude.join(',')}`;
+    if (settings.routeType === 'short' || settings.routeType === 'eco') url += '&weight=shortest';
+    return url;
+}
+
 async function reroute() {
-    appState.isRerouting = false;
-    speak("Przeliczanie trasy jest wyłączone. Jedź według zapisanej trasy.");
+    if(appState.isRerouting||!appState.userPos||!appState.destination)return;
+    appState.isRerouting = true;
+    try{
+        const response=await fetch(buildRouteUrl(appState.userPos,appState.destination));
+        const data=await response.json();
+        if(data.code!=='Ok'||!data.routes||!data.routes.length)throw new Error('Brak trasy');
+        appState.alternativeRoutes=data.routes;
+        appState.alternativeRouteLines.forEach(line=>map.removeLayer(line));
+        appState.alternativeRouteLines=[];
+        selectRoute(0,data.routes);
+        appState.isRerouting=false;
+        speak('Trasa przeliczona.');
+    }catch(e){
+        appState.isRerouting=false;
+        speak('Nie udało się przeliczyć trasy. Jedź według mapy.');
+    }
 }
 
 function renderLaneGuidance(lanes) {
@@ -1544,8 +1636,8 @@ function stopNav(){
     stopSimulation(false);
     cancelSmoothNavigation();
     exitNavigationOfflineMode();
-    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'idle',junctionFocusDoneKm:null,lastMapViewPos:null,lastMapViewTime:0,smoothNav:{raf:null,fromDoneKm:0,toDoneKm:0,startTime:0,durationMs:0,lastRenderDoneKm:null},poiLoadSeq:appState.poiLoadSeq+1});
-    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');resetMapRotation();['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
+    Object.assign(appState,{destination:null,destinationName:'',navigationActive:false,isRerouting:false,routeInstructions:[],routeCoords:[],routeCumulativeDists:[],routeProgress:{percent:0,doneKm:0,remainingKm:0,closestIndex:0,distanceFromRoute:Infinity,snapped:null},instructionIndex:0,lastSpokenIdx:-1,totalRouteDist:0,lastCameraSpoken:null,currentSpeedLimit:0,routePOIs:[],alternativeRoutes:[],selectedRouteData:null,trafficIncidents:[],speedLimits:[],routeWeather:[],spoken500m:new Set(),spokenCameras500m:new Set(),tripStartTime:0,tripHistorySaved:false,maxSpeed:0,lastOffRouteWarn:0,navCameraMode:'idle',junctionFocusDoneKm:null,lastMapViewPos:null,lastMapViewTime:0,smoothNav:{raf:null,fromDoneKm:0,toDoneKm:0,startTime:0,durationMs:0,lastRenderDoneKm:null},poiStatus:{state:'idle',cameras:0,pois:0,error:'',updated:0},poiLoadSeq:appState.poiLoadSeq+1});
+    routeCameras=[];updateCenterUserMarker(false);appState.poiMarkers.forEach(m=>map.removeLayer(m));appState.poiMarkers=[];clearRoutePreviewMarkers();clearRoutePreviewCache();if(appState.routeLine){map.removeLayer(appState.routeLine);appState.routeLine=null}appState.alternativeRouteLines.forEach(l=>map.removeLayer(l));appState.alternativeRouteLines=[];localStorage.removeItem('naviLastRoute');resetMapRotation();['topBar','speedBar','rightSidebar','mobileNavActions','speedCluster','cameraAlert','speedWarning','nextTurnHint','routeChoicePanel','laneBar','elevationChartContainer','reportPanel','tripSummaryPanel','osmStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('show')});document.getElementById('sbTrack').querySelectorAll('.sidebar-strip-marker').forEach(m=>m.remove());document.getElementById('sbProgress').style.height='0%';speechQueue=[];speechBusy=false;if(window.speechSynthesis&&window.speechSynthesis.speaking)window.speechSynthesis.cancel();document.getElementById('voiceToast').classList.remove('show');document.getElementById('persistentMenu').style.display='flex';speak("Nawigacja zatrzymana")
 }
 
 let favorites = [];

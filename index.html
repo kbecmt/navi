@@ -118,6 +118,9 @@
     </div>
 </div>
 
+<!-- ===== OSM DATA STATUS ===== -->
+<div id="osmStatus">OSM: —</div>
+
 <!-- ===== PERSISTENT MENU BUTTON ===== -->
 <button id="persistentMenu" onclick="openMainMenu()" title="Menu">☰</button>
 
@@ -172,6 +175,7 @@
         <div class="mm-item" onclick="toggleSimulation();closeMainMenu()"><span class="mm-icon">▶</span><span class="mm-label" id="simulationMenuLabel">Symuluj trasę</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openUserIncidentsPanel()"><span class="mm-icon">📢</span><span class="mm-label">Moje zgłoszenia</span><span class="mm-arrow">›</span></div>
         <div class="mm-item" onclick="openOfflineMaps()"><span class="mm-icon">📥</span><span class="mm-label">Mapy offline</span><span class="mm-arrow">›</span></div>
+        <div class="mm-item" onclick="openAppStatusPanel()"><span class="mm-icon">◎</span><span class="mm-label">Status aplikacji</span><span class="mm-arrow">›</span></div>
         <div class="mm-toggle-row">
             <span>🌙 Tryb nocny</span>
             <div class="mm-toggle" id="dayNightToggle" onclick="toggleDayNight()"></div>

@@ -669,6 +669,41 @@ body.day-mode .vup-secondary {
     color: var(--text);
 }
 
+#osmStatus {
+    position: fixed;
+    left: calc(15px + env(safe-area-inset-left));
+    top: calc(78px + env(safe-area-inset-top));
+    z-index: 996;
+    display: none;
+    max-width: min(280px, calc(100vw - 110px));
+    padding: 7px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(15, 18, 26, 0.58);
+    color: white;
+    box-shadow: var(--shadow-sm);
+    font-size: 12px;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    backdrop-filter: blur(12px);
+}
+
+#osmStatus.show {
+    display: block;
+}
+
+#osmStatus.error {
+    background: rgba(240, 68, 56, 0.72);
+}
+
+body.day-mode #osmStatus {
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.68);
+    color: var(--text);
+}
+
 /* ===== MENU I PANELE ===== */
 #persistentMenu {
     position: fixed;
@@ -2174,6 +2209,14 @@ body.car-mode #dest {
         font-size: 20px;
         opacity: 0.82;
     }
+
+    #osmStatus {
+        top: calc(43px + env(safe-area-inset-top));
+        left: calc(8px + env(safe-area-inset-left));
+        max-width: 42vw;
+        padding: 4px 7px;
+        font-size: 10px;
+    }
 }
 
 @media (max-width: 520px) {
@@ -2350,6 +2393,14 @@ body.car-mode #dest {
         bottom: calc(14px + env(safe-area-inset-bottom));
         width: 58px;
         height: 58px;
+    }
+
+    #osmStatus {
+        top: calc(55px + env(safe-area-inset-top));
+        left: calc(8px + env(safe-area-inset-left));
+        max-width: calc(100vw - 58px);
+        padding: 5px 8px;
+        font-size: 11px;
     }
 
     #mainMenu,
