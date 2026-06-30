@@ -92,6 +92,7 @@ input:focus {
   will-change: transform;
 }
 
+.nearby-road,
 .route-bg,
 .route-line,
 .route-done {
@@ -99,6 +100,11 @@ input:focus {
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
+}
+
+.nearby-road {
+  stroke: rgba(190, 198, 208, 0.46);
+  stroke-width: 2;
 }
 
 .route-bg {

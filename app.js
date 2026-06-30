@@ -14,6 +14,7 @@ const MANEUVER_VIEWBOX_SIZE = 30;
 const MIN_RENDER_INTERVAL_MS = 900;
 const GPS_RENDER_STEP_KM = 0.008;
 const GPS_SPEED_RENDER_STEP_KMH = 5;
+const NEARBY_ROAD_MAX_DISTANCE_KM = 0.5;
 
 const state = {
   start: null,
@@ -317,14 +318,17 @@ function buildInstructions(osrmRoute, coords) {
     .filter((item, index, all) => index === 0 || Math.abs(item.doneKm - all[index - 1].doneKm) > 0.015 || item.type === "arrive");
 }
 
-function routeBoundsWithMargin(coords, margin = 0.035) {
+function routeBoundsWithMargin(coords, marginKm = 0.55) {
   const b = bounds(coords);
   if (!b) return null;
+  const midLat = (b.minLat + b.maxLat) / 2;
+  const latMargin = marginKm / 111;
+  const lngMargin = marginKm / (111 * Math.max(0.2, Math.cos(midLat * Math.PI / 180)));
   return {
-    south: b.minLat - margin,
-    west: b.minLng - margin,
-    north: b.maxLat + margin,
-    east: b.maxLng + margin
+    south: b.minLat - latMargin,
+    west: b.minLng - lngMargin,
+    north: b.maxLat + latMargin,
+    east: b.maxLng + lngMargin
   };
 }
 
@@ -338,7 +342,8 @@ way["highway"="speed_camera"](${bbox});
 node["enforcement"="maxspeed"](${bbox});
 way["enforcement"="maxspeed"](${bbox});
 way["highway"]["maxspeed"](${bbox});
-);out center tags;`;
+way["highway"~"motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|road"](${bbox});
+);out body center geom;`;
 }
 
 function poiMeta(tags = {}) {
@@ -388,6 +393,22 @@ function normalizeSpeedLimitElement(item) {
   };
 }
 
+function normalizeRoadElement(item) {
+  const tags = item.tags || {};
+  if (item.type !== "way" || !tags.highway || !Array.isArray(item.geometry)) return null;
+  if (tags.area === "yes" || tags.highway === "services" || tags.highway === "rest_area") return null;
+  const coords = item.geometry
+    .map(point => ({ lat: point.lat, lng: point.lon }))
+    .filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  if (coords.length < 2) return null;
+  return {
+    id: item.id,
+    name: tags.name || tags.ref || "",
+    highway: tags.highway,
+    coords
+  };
+}
+
 async function fetchOverpassPoints(coords) {
   const box = routeBoundsWithMargin(coords);
   if (!box) return [];
@@ -414,6 +435,7 @@ async function loadRoutePoints(coords) {
   const rawElements = await fetchOverpassPoints(coords);
   const raw = rawElements.map(normalizeOverpassElement).filter(Boolean);
   const rawLimits = rawElements.map(normalizeSpeedLimitElement).filter(Boolean);
+  const rawRoads = rawElements.map(normalizeRoadElement).filter(Boolean);
   const seen = new Set();
   const enriched = raw.map(point => {
     const doneKm = nearestProgressOnCoords(point, coords);
@@ -428,8 +450,39 @@ async function loadRoutePoints(coords) {
   return {
     pois: enriched.filter(point => point.type !== "camera"),
     cameras: enriched.filter(point => point.type === "camera"),
-    speedLimits: normalizeRouteSpeedLimits(rawLimits, coords)
+    speedLimits: normalizeRouteSpeedLimits(rawLimits, coords),
+    nearbyRoads: normalizeNearbyRoads(rawRoads, coords)
   };
+}
+
+function normalizeNearbyRoads(roads, routeCoords) {
+  const cumulative = buildCumulative(routeCoords);
+  const seen = new Set();
+  return roads.map(road => {
+    const measured = road.coords.map(point => {
+      const doneKm = nearestProgressOnPrepared(point, routeCoords, cumulative);
+      const snapped = routePointAtOnPrepared(doneKm, routeCoords, cumulative);
+      return {
+        point,
+        distance: snapped ? kmBetween(point, snapped) : Infinity
+      };
+    });
+    const distanceFromRoute = Math.min(...measured.map(item => item.distance));
+    const coords = measured
+      .filter((item, index, all) => (
+        item.distance <= NEARBY_ROAD_MAX_DISTANCE_KM ||
+        all[index - 1]?.distance <= NEARBY_ROAD_MAX_DISTANCE_KM ||
+        all[index + 1]?.distance <= NEARBY_ROAD_MAX_DISTANCE_KM
+      ))
+      .map(item => item.point);
+    return { ...road, coords, distanceFromRoute };
+  }).filter(road => road.distanceFromRoute <= NEARBY_ROAD_MAX_DISTANCE_KM).filter(road => {
+    if (road.coords.length < 2) return false;
+    const key = road.id || `${road.name}:${road.highway}:${road.coords[0].lat}:${road.coords[0].lng}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 280);
 }
 
 function normalizeRouteSpeedLimits(limits, coords) {
@@ -448,6 +501,10 @@ function normalizeRouteSpeedLimits(limits, coords) {
 
 function routePointAtOnCoords(km, coords) {
   const cumulative = buildCumulative(coords);
+  return routePointAtOnPrepared(km, coords, cumulative);
+}
+
+function routePointAtOnPrepared(km, coords, cumulative) {
   const total = cumulative[cumulative.length - 1] || 0;
   const target = Math.max(0, Math.min(km, total));
   for (let i = 1; i < cumulative.length; i++) {
@@ -467,6 +524,10 @@ function routePointAtOnCoords(km, coords) {
 
 function nearestProgressOnCoords(point, coords) {
   const cumulative = buildCumulative(coords);
+  return nearestProgressOnPrepared(point, coords, cumulative);
+}
+
+function nearestProgressOnPrepared(point, coords, cumulative) {
   let best = { distance: Infinity, km: 0 };
   for (let i = 1; i < coords.length; i++) {
     const a = coords[i - 1];
@@ -501,22 +562,52 @@ function getNextInstruction() {
   return instructions[state.nextInstructionIndex] || null;
 }
 
+function mercatorPoint(p) {
+  const lat = Math.max(-85, Math.min(85, p.lat));
+  const rad = lat * Math.PI / 180;
+  return {
+    x: p.lng,
+    y: Math.log(Math.tan(Math.PI / 4 + rad / 2)) * 180 / Math.PI
+  };
+}
+
 function bounds(coords) {
   if (!coords.length) return null;
-  return coords.reduce((b, p) => ({
-    minLat: Math.min(b.minLat, p.lat),
-    maxLat: Math.max(b.maxLat, p.lat),
-    minLng: Math.min(b.minLng, p.lng),
-    maxLng: Math.max(b.maxLng, p.lng)
-  }), { minLat: coords[0].lat, maxLat: coords[0].lat, minLng: coords[0].lng, maxLng: coords[0].lng });
+  const first = mercatorPoint(coords[0]);
+  return coords.reduce((b, p) => {
+    const q = mercatorPoint(p);
+    return {
+      minLat: Math.min(b.minLat, p.lat),
+      maxLat: Math.max(b.maxLat, p.lat),
+      minLng: Math.min(b.minLng, p.lng),
+      maxLng: Math.max(b.maxLng, p.lng),
+      minX: Math.min(b.minX, q.x),
+      maxX: Math.max(b.maxX, q.x),
+      minY: Math.min(b.minY, q.y),
+      maxY: Math.max(b.maxY, q.y)
+    };
+  }, {
+    minLat: coords[0].lat,
+    maxLat: coords[0].lat,
+    minLng: coords[0].lng,
+    maxLng: coords[0].lng,
+    minX: first.x,
+    maxX: first.x,
+    minY: first.y,
+    maxY: first.y
+  });
 }
 
 function project(p, b, pad = 7) {
-  const latRange = Math.max(0.000001, b.maxLat - b.minLat);
-  const lngRange = Math.max(0.000001, b.maxLng - b.minLng);
+  const q = mercatorPoint(p);
+  const xRange = Math.max(0.000001, b.maxX - b.minX);
+  const yRange = Math.max(0.000001, b.maxY - b.minY);
+  const scale = (100 - pad * 2) / Math.max(xRange, yRange);
+  const midX = (b.minX + b.maxX) / 2;
+  const midY = (b.minY + b.maxY) / 2;
   return {
-    x: pad + ((p.lng - b.minLng) / lngRange) * (100 - pad * 2),
-    y: pad + ((b.maxLat - p.lat) / latRange) * (100 - pad * 2)
+    x: 50 + (q.x - midX) * scale,
+    y: 50 - (q.y - midY) * scale
   };
 }
 
@@ -567,9 +658,14 @@ function applyRouteCamera(viewBox, routePoint) {
 
 function svgPointToScreen(point, viewBox) {
   const svgRect = el.svg.getBoundingClientRect();
+  const scale = Math.min(svgRect.width / viewBox.width, svgRect.height / viewBox.height);
+  const drawnWidth = viewBox.width * scale;
+  const drawnHeight = viewBox.height * scale;
+  const offsetX = (svgRect.width - drawnWidth) / 2;
+  const offsetY = (svgRect.height - drawnHeight) / 2;
   return {
-    x: svgRect.left + ((point.x - viewBox.x) / viewBox.width) * svgRect.width,
-    y: svgRect.top + ((point.y - viewBox.y) / viewBox.height) * svgRect.height
+    x: svgRect.left + offsetX + (point.x - viewBox.x) * scale,
+    y: svgRect.top + offsetY + (point.y - viewBox.y) * scale
   };
 }
 
@@ -661,7 +757,11 @@ function render(force = false) {
   }
 
   const coords = route.coords;
-  const b = bounds(coords);
+  const visibleCoords = [
+    ...coords,
+    ...(route.nearbyRoads || []).flatMap(road => road.coords || [])
+  ];
+  const b = bounds(visibleCoords.length ? visibleCoords : coords);
   const all = polyline(coords, b);
   const doneCoords = coords.filter((_, index) => state.cumulative[index] <= state.progressKm);
   const point = routePointAt(state.progressKm);
@@ -669,6 +769,10 @@ function render(force = false) {
   applySvgViewBox(viewBox);
   applyRouteCamera(viewBox, point);
 
+  for (const road of route.nearbyRoads || []) {
+    if (!road.coords?.length) continue;
+    el.svg.insertAdjacentHTML("beforeend", `<polyline class="nearby-road" points="${polyline(road.coords, b)}"><title>${road.name || "Droga OSM"}</title></polyline>`);
+  }
   el.svg.insertAdjacentHTML("beforeend", `<polyline class="route-bg" points="${all}"></polyline>`);
   el.svg.insertAdjacentHTML("beforeend", `<polyline class="route-line" points="${all}"></polyline>`);
   if (doneCoords.length > 1) {
@@ -769,7 +873,7 @@ async function createRoute() {
     state.cumulative = buildCumulative(coords);
     state.totalKm = state.cumulative[state.cumulative.length - 1] || route.distance / 1000;
     const instructions = buildInstructions(route, coords);
-    state.route = { coords, instructions, pois: [], cameras: [], speedLimits: [], durationSec: route.duration, createdAt: Date.now(), destName: destQuery };
+    state.route = { coords, instructions, pois: [], cameras: [], speedLimits: [], nearbyRoads: [], durationSec: route.duration, createdAt: Date.now(), destName: destQuery };
     state.progressKm = 0;
     state.speedKmh = 0;
     state.currentLimit = null;
@@ -782,10 +886,11 @@ async function createRoute() {
       state.route.pois = routePoints.pois;
       state.route.cameras = routePoints.cameras;
       state.route.speedLimits = routePoints.speedLimits;
+      state.route.nearbyRoads = routePoints.nearbyRoads;
     } catch (error) {
       console.warn("Nie udało się pobrać punktów OSM", error);
     }
-    showStatus(`Trasa gotowa: ${state.route.pois.length} POI, ${state.route.cameras.length} radarów, ${state.route.speedLimits.length} limitów`);
+    showStatus(`Trasa gotowa: ${state.route.pois.length} POI, ${state.route.cameras.length} radarów, ${state.route.speedLimits.length} limitów, ${state.route.nearbyRoads.length} dróg`);
     saveRoute();
     scheduleRender(true);
     setPanelOpen(false);
@@ -824,6 +929,7 @@ function loadRoute() {
   if (!Array.isArray(state.route.pois)) state.route.pois = [];
   if (!Array.isArray(state.route.cameras)) state.route.cameras = [];
   if (!Array.isArray(state.route.speedLimits)) state.route.speedLimits = [];
+  if (!Array.isArray(state.route.nearbyRoads)) state.route.nearbyRoads = [];
   state.progressKm = Math.min(saved.progressKm || 0, state.totalKm);
   state.speedKmh = 0;
   state.nextInstructionIndex = 0;
@@ -846,8 +952,9 @@ function updateSavedInfo() {
     const pois = saved.route?.pois?.length || 0;
     const cameras = saved.route?.cameras?.length || 0;
     const speedLimits = saved.route?.speedLimits?.length || 0;
+    const nearbyRoads = saved.route?.nearbyRoads?.length || 0;
     const date = new Date(saved.route?.createdAt || Date.now()).toLocaleString("pl-PL");
-    el.savedInfo.textContent = `Zapis: ${count} punktów, ${instructions} manewrów, ${pois} POI, ${cameras} radarów, ${speedLimits} limitów, ${date}`;
+    el.savedInfo.textContent = `Zapis: ${count} punktów, ${instructions} manewrów, ${pois} POI, ${cameras} radarów, ${speedLimits} limitów, ${nearbyRoads} dróg, ${date}`;
   } catch (_) {
     el.savedInfo.textContent = "Zapis: uszkodzony";
   }
