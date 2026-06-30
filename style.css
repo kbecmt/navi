@@ -93,9 +93,9 @@ body.day-mode #map {
     right: 0;
     z-index: 1000;
     display: none;
-    padding: calc(12px + env(safe-area-inset-top)) calc(94px + env(safe-area-inset-right)) 12px calc(15px + env(safe-area-inset-left));
-    background: linear-gradient(135deg, #17a34a, var(--route-green));
-    box-shadow: var(--shadow-md);
+    padding: calc(10px + env(safe-area-inset-top)) calc(84px + env(safe-area-inset-right)) 10px calc(12px + env(safe-area-inset-left));
+    background: linear-gradient(135deg, rgba(23, 163, 74, 0.78), rgba(22, 150, 66, 0.68));
+    box-shadow: 0 10px 24px rgba(11, 18, 32, 0.16);
     opacity: 0;
     transform: translateY(-100%);
     transition: opacity 0.3s, transform 0.3s;
@@ -117,16 +117,16 @@ body.day-mode #map {
 }
 
 .turn-arrow {
-    width: 66px;
-    min-width: 66px;
-    height: 66px;
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(255, 255, 255, 0.16);
     color: white;
-    font-size: 46px;
+    font-size: 38px;
     font-weight: 800;
 }
 
@@ -139,7 +139,7 @@ body.day-mode #map {
 
 .nav-dist {
     color: white;
-    font-size: 34px;
+    font-size: 30px;
     font-weight: 800;
     letter-spacing: 0;
 }
@@ -154,7 +154,7 @@ body.day-mode #map {
 .nav-street {
     overflow: hidden;
     color: rgba(255, 255, 255, 0.94);
-    font-size: 22px;
+    font-size: 19px;
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -222,10 +222,10 @@ body.day-mode #map {
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 78px;
+    width: 62px;
     height: 100%;
-    padding: calc(95px + env(safe-area-inset-top)) 0 calc(80px + env(safe-area-inset-bottom));
-    background: linear-gradient(180deg, rgba(12, 16, 24, 0.72), rgba(12, 16, 24, 0.5));
+    padding: calc(82px + env(safe-area-inset-top)) 0 calc(74px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(12, 16, 24, 0.34), rgba(12, 16, 24, 0.16));
     backdrop-filter: var(--blur-panel);
     opacity: 0;
     transform: translateX(100%);
@@ -239,7 +239,7 @@ body.day-mode #map {
 
 .sidebar-time {
     color: white;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 800;
     text-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
 }
@@ -301,10 +301,10 @@ body.day-mode #map {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     color: white;
-    font-size: 18px;
+    font-size: 15px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
     transform: translateX(-50%);
 }
@@ -313,17 +313,17 @@ body.day-mode #map {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
-    height: 24px;
+    min-width: 21px;
+    height: 21px;
     border-radius: 999px;
     background: rgba(20, 24, 32, 0.82);
     border: 1px solid rgba(255, 255, 255, 0.18);
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .sidebar-strip-marker .icon-dot.turn {
-    width: 26px;
-    height: 26px;
+    width: 23px;
+    height: 23px;
     background: rgba(31, 122, 255, 0.92);
     font-weight: 800;
 }
@@ -346,15 +346,15 @@ body.day-mode #map {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 50px;
-    height: 50px;
+    width: 42px;
+    height: 42px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.14);
     color: white;
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
     cursor: pointer;
-    font-size: 22px;
+    font-size: 19px;
     transition: background 0.2s, transform 0.2s;
 }
 
@@ -449,8 +449,8 @@ body.day-mode #map {
     display: none;
     padding: 10px calc(15px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(15px + env(safe-area-inset-left));
     border-top: 1px solid var(--border-dark);
-    background: var(--surface-dark);
-    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.22);
+    background: rgba(28, 31, 38, 0.72);
+    box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.16);
     opacity: 0;
     transform: translateY(100%);
     transition: all 0.3s;
@@ -465,7 +465,7 @@ body.day-mode #map {
 
 body.day-mode #speedBar {
     border-top-color: var(--border);
-    background: var(--surface);
+    background: rgba(255, 255, 255, 0.72);
 }
 
 .sb-row {
@@ -2005,7 +2005,9 @@ body.car-mode #dest {
     }
 
     #topBar {
-        padding: calc(8px + env(safe-area-inset-top)) calc(64px + env(safe-area-inset-right)) 8px calc(10px + env(safe-area-inset-left));
+        padding: calc(6px + env(safe-area-inset-top)) calc(54px + env(safe-area-inset-right)) 6px calc(8px + env(safe-area-inset-left));
+        background: linear-gradient(135deg, rgba(23, 163, 74, 0.58), rgba(22, 150, 66, 0.48));
+        box-shadow: 0 6px 16px rgba(11, 18, 32, 0.12);
     }
 
     #voiceUnlockPanel {
@@ -2020,38 +2022,47 @@ body.car-mode #dest {
         position: static;
         max-width: 100%;
         margin-top: 7px;
-        padding: 6px 9px;
-        font-size: 13px;
+        padding: 4px 7px;
+        background: rgba(0, 0, 0, 0.22);
+        font-size: 11px;
+    }
+
+    .nav-row {
+        gap: 8px;
     }
 
     .turn-arrow {
-        width: 48px;
-        min-width: 48px;
-        height: 48px;
-        font-size: 32px;
-    }
-
-    .nav-dist {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
         font-size: 25px;
     }
 
+    .nav-dist {
+        font-size: 21px;
+    }
+
+    .nav-dist-unit {
+        font-size: 13px;
+    }
+
     .nav-street {
-        font-size: 16px;
+        font-size: 13px;
     }
 
     #rightSidebar {
-        width: 56px;
-        padding: calc(82px + env(safe-area-inset-top)) 0 calc(150px + env(safe-area-inset-bottom));
-        background: linear-gradient(180deg, rgba(12, 16, 24, 0.58), rgba(12, 16, 24, 0.28));
+        width: 42px;
+        padding: calc(62px + env(safe-area-inset-top)) 0 calc(118px + env(safe-area-inset-bottom));
+        background: linear-gradient(180deg, rgba(12, 16, 24, 0.18), rgba(12, 16, 24, 0.06));
     }
 
     .sidebar-time {
-        font-size: 14px;
+        font-size: 11px;
     }
 
     .eta-dist {
-        max-width: 48px;
-        font-size: 12px;
+        max-width: 38px;
+        font-size: 10px;
     }
 
     .sidebar-strip {
@@ -2059,19 +2070,20 @@ body.car-mode #dest {
     }
 
     .sidebar-strip-track {
-        width: 6px;
+        width: 4px;
     }
 
     .sidebar-strip-marker {
-        width: 24px;
-        height: 24px;
-        font-size: 15px;
+        width: 18px;
+        height: 18px;
+        font-size: 12px;
     }
 
     .sidebar-strip-marker .icon-dot {
-        min-width: 22px;
-        height: 22px;
-        font-size: 12px;
+        min-width: 17px;
+        height: 17px;
+        font-size: 10px;
+        background: rgba(20, 24, 32, 0.62);
     }
 
     .sidebar-bottom-icons {
@@ -2091,19 +2103,25 @@ body.car-mode #dest {
     }
 
     .sc-ring {
-        width: 78px;
-        height: 78px;
-        border-width: 4px;
+        width: 64px;
+        height: 64px;
+        border-width: 3px;
+        background: rgba(12, 16, 24, 0.64);
     }
 
     .sc-current {
-        font-size: 30px;
+        font-size: 24px;
+    }
+
+    .sc-unit {
+        font-size: 10px;
     }
 
     .sc-limit {
-        width: 38px;
-        height: 38px;
-        font-size: 17px;
+        width: 30px;
+        height: 30px;
+        font-size: 13px;
+        border-width: 2px;
     }
 
     #speedBar {
@@ -2132,16 +2150,21 @@ body.car-mode #dest {
     }
 
     #mobileNavActions {
-        left: calc(96px + env(safe-area-inset-left));
-        right: calc(62px + env(safe-area-inset-right));
+        left: calc(78px + env(safe-area-inset-left));
+        right: calc(50px + env(safe-area-inset-right));
         bottom: calc(72px + env(safe-area-inset-bottom));
         gap: 7px;
     }
 
     #mobileNavActions button {
-        height: 48px;
-        border-radius: 14px;
-        font-size: 20px;
+        height: 40px;
+        border-radius: 12px;
+        background: rgba(15, 18, 26, 0.56);
+        font-size: 17px;
+    }
+
+    body.day-mode #mobileNavActions button {
+        background: rgba(255, 255, 255, 0.58);
     }
 
     #persistentMenu {
