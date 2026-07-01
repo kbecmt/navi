@@ -87,11 +87,6 @@ input:focus {
   transform-origin: 50% 50%;
 }
 
-#routeSvg.maneuver-camera {
-  transition: transform 0.45s linear;
-  will-change: transform;
-}
-
 .nearby-road,
 .route-bg,
 .route-line,

@@ -644,16 +644,10 @@ function smoothAngle(current, target, factor = 0.38) {
   return (current + delta * factor + 360) % 360;
 }
 
-function applyRouteCamera(viewBox, routePoint) {
-  if (!viewBox.zoomed || !routePoint) {
-    state.cameraBearing = null;
-    el.svg.classList.remove("maneuver-camera");
-    el.svg.style.transform = "";
-    return;
-  }
-  state.cameraBearing = smoothAngle(state.cameraBearing, routePoint.bearing);
-  el.svg.classList.add("maneuver-camera");
-  el.svg.style.transform = `rotate(${-state.cameraBearing}deg)`;
+function applyRouteCamera() {
+  state.cameraBearing = null;
+  el.svg.classList.remove("maneuver-camera");
+  el.svg.style.transform = "";
 }
 
 function svgPointToScreen(point, viewBox) {
@@ -738,7 +732,7 @@ function render(force = false) {
   el.svg.innerHTML = "";
   if (!route?.coords?.length) {
     applySvgViewBox({ x: 0, y: 0, width: 100, height: 100 });
-    applyRouteCamera({ zoomed: false }, null);
+    applyRouteCamera();
     el.vehicle.style.display = "none";
     state.currentLimit = null;
     el.sumDistance.textContent = "--";
@@ -767,7 +761,7 @@ function render(force = false) {
   const point = routePointAt(state.progressKm);
   const viewBox = getRouteViewBox(point, b);
   applySvgViewBox(viewBox);
-  applyRouteCamera(viewBox, point);
+  applyRouteCamera();
 
   for (const road of route.nearbyRoads || []) {
     if (!road.coords?.length) continue;
