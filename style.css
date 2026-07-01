@@ -304,6 +304,44 @@ input:focus {
   font-size: 14px;
 }
 
+#laneGuide {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#laneGuide.visible {
+  display: flex;
+}
+
+#laneGuide::-webkit-scrollbar {
+  display: none;
+}
+
+.lane {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 7px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.48);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lane.active {
+  border-color: rgba(30, 223, 106, 0.75);
+  background: rgba(30, 223, 106, 0.2);
+  color: #7cffaf;
+}
+
 #nextManeuverText {
   overflow: hidden;
   text-overflow: ellipsis;

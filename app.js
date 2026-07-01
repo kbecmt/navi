@@ -16,6 +16,11 @@ const MIN_RENDER_INTERVAL_MS = 900;
 const GPS_RENDER_STEP_KM = 0.008;
 const GPS_SPEED_RENDER_STEP_KMH = 5;
 const NEARBY_ROAD_MAX_DISTANCE_KM = 0.5;
+const VISUAL_PREDICT_SECONDS = 0.9;
+const CAMERA_LOOKAHEAD_SECONDS = 4.2;
+const CAMERA_LOOKAHEAD_MIN_KM = 0.025;
+const CAMERA_LOOKAHEAD_MAX_KM = 0.18;
+const MOTION_EPSILON_KM = 0.0007;
 
 const state = {
   start: null,
@@ -24,6 +29,11 @@ const state = {
   cumulative: [],
   totalKm: 0,
   progressKm: 0,
+  visualProgressKm: 0,
+  cameraProgressKm: 0,
+  progressUpdatedAt: 0,
+  motionFrame: null,
+  lastMotionFrameAt: 0,
   simulation: null,
   gpsWatch: null,
   lastGps: null,
@@ -37,6 +47,7 @@ const state = {
   lastRenderAt: 0,
   lastRenderedSpeedKmh: 0,
   cameraBearing: null,
+  vehicleBearing: null,
   settings: {
     maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM
   }
@@ -53,6 +64,7 @@ const el = {
   maneuverIcon: document.getElementById("maneuverIcon"),
   maneuverDistance: document.getElementById("maneuverDistance"),
   maneuverText: document.getElementById("maneuverText"),
+  laneGuide: document.getElementById("laneGuide"),
   nextManeuverText: document.getElementById("nextManeuverText"),
   panel: document.getElementById("panel"),
   panelHandle: document.getElementById("panelHandle"),
@@ -146,6 +158,31 @@ function maneuverLabel(type = "", modifier = "", name = "") {
   if (modifier.includes("right")) return `Skręć w prawo${road}`;
   if (modifier.includes("straight")) return name ? `Jedź prosto przez ${name}` : "Jedź prosto";
   return name ? `Jedź ${name}` : "Kontynuuj jazdę";
+}
+
+function laneArrow(indication = "") {
+  if (indication.includes("uturn")) return "↺";
+  if (indication.includes("sharp left")) return "↰";
+  if (indication.includes("slight left")) return "↖";
+  if (indication.includes("left")) return "←";
+  if (indication.includes("sharp right")) return "↱";
+  if (indication.includes("slight right")) return "↗";
+  if (indication.includes("right")) return "→";
+  if (indication.includes("straight")) return "↑";
+  return "•";
+}
+
+function normalizeLanes(step) {
+  const intersections = Array.isArray(step.intersections) ? step.intersections : [];
+  const intersection = intersections.find(item => Array.isArray(item.lanes) && item.lanes.length);
+  if (!intersection) return [];
+  return intersection.lanes.map(lane => {
+    const indications = Array.isArray(lane.indications) ? lane.indications : [];
+    return {
+      active: lane.valid === true,
+      arrows: indications.length ? indications.map(laneArrow).join("") : "•"
+    };
+  });
 }
 
 function showStatus(text) {
@@ -291,6 +328,52 @@ function routePointAt(km) {
   return { ...coords[coords.length - 1], bearing: 0 };
 }
 
+function markProgressUpdated() {
+  state.progressUpdatedAt = performance.now();
+}
+
+function resetMotionProgress(progressKm = state.progressKm) {
+  const progress = Math.max(0, Math.min(progressKm || 0, state.totalKm || 0));
+  state.visualProgressKm = progress;
+  state.cameraProgressKm = progress;
+  state.vehicleBearing = null;
+  markProgressUpdated();
+  state.lastMotionFrameAt = 0;
+}
+
+function predictedProgressKm(seconds = VISUAL_PREDICT_SECONDS) {
+  if (!state.route) return state.progressKm;
+  const now = performance.now();
+  const elapsedSec = state.progressUpdatedAt ? Math.min(1.6, Math.max(0, (now - state.progressUpdatedAt) / 1000)) : 0;
+  const speedKmPerSec = Math.max(0, state.speedKmh) / 3600;
+  return Math.min(state.totalKm, state.progressKm + speedKmPerSec * Math.min(seconds, elapsedSec));
+}
+
+function cameraTargetProgressKm(visualKm) {
+  if (!state.route) return visualKm;
+  const speedLeadKm = (Math.max(0, state.speedKmh) / 3600) * CAMERA_LOOKAHEAD_SECONDS;
+  const leadKm = clamp(speedLeadKm, CAMERA_LOOKAHEAD_MIN_KM, CAMERA_LOOKAHEAD_MAX_KM);
+  return Math.min(state.totalKm, visualKm + leadKm);
+}
+
+function routeCoordsUntil(km) {
+  const coords = state.route?.coords || [];
+  if (!coords.length) return [];
+  const target = Math.max(0, Math.min(km, state.totalKm));
+  const result = [];
+  for (let i = 0; i < coords.length; i++) {
+    if ((state.cumulative[i] || 0) <= target) result.push(coords[i]);
+    else break;
+  }
+  const point = routePointAt(target);
+  if (point) result.push(point);
+  return result.filter((point, index, all) => {
+    if (!index) return true;
+    const prev = all[index - 1];
+    return Math.abs(point.lat - prev.lat) > 0.0000001 || Math.abs(point.lng - prev.lng) > 0.0000001;
+  });
+}
+
 function nearestProgress(point) {
   if (!state.route?.coords?.length) return 0;
   let best = { distance: Infinity, km: 0 };
@@ -337,7 +420,8 @@ function buildInstructions(osrmRoute, coords) {
         type,
         modifier,
         arrow: directionArrow(modifier, type),
-        text: maneuverLabel(type, modifier, step.name || "")
+        text: maneuverLabel(type, modifier, step.name || ""),
+        lanes: normalizeLanes(step)
       });
     }
   }
@@ -770,33 +854,87 @@ function scheduleRender(force = false) {
   }, wait);
 }
 
+function startMotionAnimation() {
+  if (state.motionFrame !== null) return;
+  state.motionFrame = requestAnimationFrame(animateMotion);
+}
+
+function stopMotionAnimation() {
+  if (state.motionFrame !== null) cancelAnimationFrame(state.motionFrame);
+  state.motionFrame = null;
+  state.lastMotionFrameAt = 0;
+}
+
+function animateMotion(now) {
+  state.motionFrame = null;
+  if (!state.route) {
+    stopMotionAnimation();
+    return;
+  }
+
+  const previousFrameAt = state.lastMotionFrameAt || now;
+  const dt = Math.min(80, Math.max(16, now - previousFrameAt));
+  state.lastMotionFrameAt = now;
+
+  const targetVisual = predictedProgressKm();
+  const visualAlpha = 1 - Math.exp(-dt / 170);
+  state.visualProgressKm += (targetVisual - state.visualProgressKm) * visualAlpha;
+
+  const targetCamera = cameraTargetProgressKm(state.visualProgressKm);
+  const cameraAlpha = 1 - Math.exp(-dt / 260);
+  state.cameraProgressKm += (targetCamera - state.cameraProgressKm) * cameraAlpha;
+
+  const visualDelta = Math.abs(targetVisual - state.visualProgressKm);
+  const cameraDelta = Math.abs(targetCamera - state.cameraProgressKm);
+  render(true);
+
+  const shouldKeepMoving =
+    visualDelta > MOTION_EPSILON_KM ||
+    cameraDelta > MOTION_EPSILON_KM ||
+    ((state.simulation || state.gpsWatch !== null) && state.speedKmh > 1 && state.visualProgressKm < state.totalKm);
+  if (shouldKeepMoving) state.motionFrame = requestAnimationFrame(animateMotion);
+  else state.lastMotionFrameAt = 0;
+}
+
 function polyline(coords, b) {
   return coords.map(p => {
     const q = project(p, b);
-    return `${q.x.toFixed(2)},${q.y.toFixed(2)}`;
+    return `${q.x.toFixed(4)},${q.y.toFixed(4)}`;
   }).join(" ");
+}
+
+function svgNum(value) {
+  return Number(value).toFixed(4);
 }
 
 function pathData(coords, b, smooth = false) {
   const points = coords.map(p => project(p, b));
   if (!points.length) return "";
   const start = points[0];
-  if (points.length === 1) return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`;
+  if (points.length === 1) return `M ${svgNum(start.x)} ${svgNum(start.y)}`;
   if (!smooth || points.length < 3) {
     return points
-      .map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .map((point, index) => `${index ? "L" : "M"} ${svgNum(point.x)} ${svgNum(point.y)}`)
       .join(" ");
   }
-  const commands = [`M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`];
-  for (let i = 1; i < points.length - 1; i++) {
+  const commands = [`M ${svgNum(start.x)} ${svgNum(start.y)}`];
+  for (let i = 0; i < points.length - 1; i++) {
+    const prev = points[Math.max(0, i - 1)];
     const current = points[i];
     const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    commands.push(`Q ${current.x.toFixed(2)} ${current.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`);
+    const after = points[Math.min(points.length - 1, i + 2)];
+    const cp1 = {
+      x: current.x + (next.x - prev.x) / 6,
+      y: current.y + (next.y - prev.y) / 6
+    };
+    const cp2 = {
+      x: next.x - (after.x - current.x) / 6,
+      y: next.y - (after.y - current.y) / 6
+    };
+    commands.push(
+      `C ${svgNum(cp1.x)} ${svgNum(cp1.y)} ${svgNum(cp2.x)} ${svgNum(cp2.y)} ${svgNum(next.x)} ${svgNum(next.y)}`
+    );
   }
-  const last = points[points.length - 1];
-  commands.push(`L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
   return commands.join(" ");
 }
 
@@ -816,6 +954,7 @@ function render(force = false) {
     applySvgViewBox({ x: 0, y: 0, width: 100, height: 100 });
     applyRouteCamera();
     el.vehicle.style.display = "none";
+    state.vehicleBearing = null;
     state.currentLimit = null;
     el.sumDistance.textContent = "--";
     el.sumTime.textContent = "--";
@@ -828,6 +967,8 @@ function render(force = false) {
     el.maneuverIcon.textContent = "↑";
     el.maneuverDistance.textContent = "--";
     el.maneuverText.textContent = "Wyznacz trasę, aby zobaczyć wskazówki";
+    el.laneGuide.innerHTML = "";
+    el.laneGuide.classList.remove("visible");
     el.nextManeuverText.textContent = "--";
     return;
   }
@@ -838,9 +979,12 @@ function render(force = false) {
     ...(route.nearbyRoads || []).flatMap(road => road.coords || [])
   ];
   const b = bounds(visibleCoords.length ? visibleCoords : coords);
-  const doneCoords = coords.filter((_, index) => state.cumulative[index] <= state.progressKm);
-  const point = routePointAt(state.progressKm);
-  const viewBox = getRouteViewBox(point, b);
+  const visualKm = Math.max(0, Math.min(state.visualProgressKm || state.progressKm, state.totalKm));
+  const cameraKm = Math.max(0, Math.min(state.cameraProgressKm || visualKm, state.totalKm));
+  const doneCoords = routeCoordsUntil(visualKm);
+  const point = routePointAt(visualKm);
+  const cameraPoint = routePointAt(cameraKm) || point;
+  const viewBox = getRouteViewBox(cameraPoint, b);
   const smoothRoute = viewBox.zoomed;
   const all = pathData(coords, b, smoothRoute);
   applySvgViewBox(viewBox);
@@ -887,10 +1031,11 @@ function render(force = false) {
   if (point) {
     const q = project(point, b);
     const screen = svgPointToScreen(q, viewBox);
+    state.vehicleBearing = smoothAngle(state.vehicleBearing, point.bearing, 0.32);
     el.vehicle.style.display = "grid";
     el.vehicle.style.left = `${screen.x}px`;
     el.vehicle.style.top = `${screen.y}px`;
-    el.vehicle.style.transform = `translate(-50%, -50%) rotate(${point.bearing}deg)`;
+    el.vehicle.style.transform = `translate(-50%, -50%) rotate(${state.vehicleBearing}deg)`;
   }
 
   const percent = state.totalKm ? Math.round((state.progressKm / state.totalKm) * 100) : 0;
@@ -912,6 +1057,8 @@ function renderManeuver() {
     el.maneuverIcon.textContent = "◎";
     el.maneuverDistance.textContent = "--";
     el.maneuverText.textContent = "Jedź do celu";
+    el.laneGuide.innerHTML = "";
+    el.laneGuide.classList.remove("visible");
     el.nextManeuverText.textContent = "";
     return;
   }
@@ -919,6 +1066,11 @@ function renderManeuver() {
   el.maneuverIcon.textContent = current.arrow;
   el.maneuverDistance.textContent = current.type === "arrive" ? `${fmtKm(distKm)} do celu` : `${fmtKm(distKm)} do manewru`;
   el.maneuverText.textContent = current.text;
+  const lanes = Array.isArray(current.lanes) ? current.lanes : [];
+  el.laneGuide.innerHTML = lanes.map(lane => (
+    `<span class="lane ${lane.active ? "active" : ""}">${lane.arrows}</span>`
+  )).join("");
+  el.laneGuide.classList.toggle("visible", lanes.length > 0);
   el.nextManeuverText.textContent = next ? `Potem: ${next.text}` : "";
   if (distKm < 0.08 && state.lastSpokenInstruction !== state.nextInstructionIndex) {
     state.lastSpokenInstruction = state.nextInstructionIndex;
@@ -955,6 +1107,7 @@ async function createRoute() {
     state.lastSpeedAlertAt = 0;
     state.nextInstructionIndex = 0;
     state.lastSpokenInstruction = -1;
+    resetMotionProgress(0);
     showStatus("Pobieranie POI i fotoradarów...");
     try {
       const routePoints = await loadRoutePoints(coords);
@@ -1009,6 +1162,7 @@ function loadRoute() {
   state.speedKmh = 0;
   state.nextInstructionIndex = 0;
   state.lastSpokenInstruction = -1;
+  resetMotionProgress(state.progressKm);
   showStatus("Wczytano trasę");
   scheduleRender(true);
   setPanelOpen(false);
@@ -1039,6 +1193,7 @@ function startSimulation() {
   if (!state.route) return alert("Najpierw wyznacz albo wczytaj trasę");
   if (state.simulation) return stopSimulation();
   state.progressKm = 0;
+  resetMotionProgress(0);
   state.nextInstructionIndex = 0;
   state.lastSpokenInstruction = -1;
   showStatus("Symulacja jazdy");
@@ -1061,6 +1216,8 @@ function startSimulation() {
       showStatus("Cel osiągnięty");
       speak("Dotarłeś do celu");
     }
+    markProgressUpdated();
+    startMotionAnimation();
     scheduleRender();
   }, 1000);
 }
@@ -1078,7 +1235,9 @@ function stopAll() {
   state.gpsWatch = null;
   state.speedKmh = 0;
   state.currentLimit = null;
+  markProgressUpdated();
   showStatus(state.route ? "Trasa zatrzymana" : "Brak trasy");
+  startMotionAnimation();
   scheduleRender(true);
 }
 
@@ -1104,9 +1263,13 @@ function startGps() {
     state.lastGps = { point, time: now };
     const previousProgress = state.progressKm;
     state.progressKm = nearestProgress(point);
+    markProgressUpdated();
+    startMotionAnimation();
     const movedEnough = Math.abs(state.progressKm - previousProgress) >= GPS_RENDER_STEP_KM;
     const speedChangedEnough = Math.abs(state.speedKmh - state.lastRenderedSpeedKmh) >= GPS_SPEED_RENDER_STEP_KMH;
-    if (movedEnough || speedChangedEnough) scheduleRender();
+    if (movedEnough || speedChangedEnough) {
+      scheduleRender();
+    }
   }, error => {
     showStatus("Błąd GPS");
     alert(gpsErrorMessage(error));
@@ -1115,12 +1278,15 @@ function startGps() {
 
 function clearRoute() {
   stopAll();
+  stopMotionAnimation();
   state.start = null;
   state.dest = null;
   state.route = null;
   state.cumulative = [];
   state.totalKm = 0;
   state.progressKm = 0;
+  state.visualProgressKm = 0;
+  state.cameraProgressKm = 0;
   state.speedKmh = 0;
   state.currentLimit = null;
   state.lastSpeedAlertAt = 0;
