@@ -5,12 +5,13 @@ const OVERPASS_URLS = [
   "https://overpass.kumi.systems/api/interpreter"
 ];
 const STORE_KEY = "simpleNaviRoute";
+const SETTINGS_KEY = "simpleNaviSettings";
 const SIM_MIN_MS = 25000;
 const SIM_MAX_MS = 120000;
 const SIM_MAX_SPEED_KMH = 100;
-const MANEUVER_ZOOM_BEFORE_KM = 0.5;
+const MANEUVER_ZOOM_BEFORE_KM = 0.3;
 const MANEUVER_ZOOM_AFTER_KM = 0.1;
-const MANEUVER_VIEWBOX_SIZE = 30;
+const DEFAULT_MANEUVER_VIEW_RADIUS_KM = 1;
 const MIN_RENDER_INTERVAL_MS = 900;
 const GPS_RENDER_STEP_KM = 0.008;
 const GPS_SPEED_RENDER_STEP_KMH = 5;
@@ -35,7 +36,10 @@ const state = {
   renderTimer: null,
   lastRenderAt: 0,
   lastRenderedSpeedKmh: 0,
-  cameraBearing: null
+  cameraBearing: null,
+  settings: {
+    maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM
+  }
 };
 
 const el = {
@@ -70,6 +74,8 @@ const el = {
   menuBtn: document.getElementById("menuBtn"),
   closeMenuBtn: document.getElementById("closeMenuBtn"),
   voiceBtn: document.getElementById("voiceBtn"),
+  maneuverZoomInput: document.getElementById("maneuverZoomInput"),
+  maneuverZoomValue: document.getElementById("maneuverZoomValue"),
   clearBtn: document.getElementById("clearBtn"),
   savedInfo: document.getElementById("savedInfo")
 };
@@ -144,6 +150,40 @@ function maneuverLabel(type = "", modifier = "", name = "") {
 
 function showStatus(text) {
   el.status.textContent = text;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    const radius = Number(saved.maneuverViewRadiusKm);
+    if (Number.isFinite(radius)) {
+      state.settings.maneuverViewRadiusKm = clamp(radius, 0.2, 2);
+    }
+  } catch (_) {
+    state.settings.maneuverViewRadiusKm = DEFAULT_MANEUVER_VIEW_RADIUS_KM;
+  }
+  updateSettingsUi();
+}
+
+function saveSettings() {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+}
+
+function updateSettingsUi() {
+  if (!el.maneuverZoomInput || !el.maneuverZoomValue) return;
+  el.maneuverZoomInput.value = String(state.settings.maneuverViewRadiusKm);
+  el.maneuverZoomValue.textContent = `${state.settings.maneuverViewRadiusKm.toFixed(1)} km`;
+}
+
+function setManeuverZoomRadius(value) {
+  state.settings.maneuverViewRadiusKm = clamp(Number(value) || DEFAULT_MANEUVER_VIEW_RADIUS_KM, 0.2, 2);
+  updateSettingsUi();
+  saveSettings();
+  scheduleRender(true);
 }
 
 function setPanelOpen(open) {
@@ -611,6 +651,25 @@ function project(p, b, pad = 7) {
   };
 }
 
+function offsetPoint(point, northKm, eastKm) {
+  const lat = point.lat + northKm / 111;
+  const lng = point.lng + eastKm / (111 * Math.max(0.2, Math.cos(point.lat * Math.PI / 180)));
+  return { lat, lng };
+}
+
+function maneuverViewBoxSize(routePoint, boundsForRoute) {
+  const car = project(routePoint, boundsForRoute);
+  const radius = state.settings.maneuverViewRadiusKm;
+  const edgePoints = [
+    offsetPoint(routePoint, radius, 0),
+    offsetPoint(routePoint, -radius, 0),
+    offsetPoint(routePoint, 0, radius),
+    offsetPoint(routePoint, 0, -radius)
+  ].map(point => project(point, boundsForRoute));
+  const svgRadius = Math.max(...edgePoints.map(point => Math.hypot(point.x - car.x, point.y - car.y)));
+  return Math.max(0.2, svgRadius * 2);
+}
+
 function getManeuverFocusInstruction() {
   const instructions = state.route?.instructions || [];
   return instructions.find(instruction => {
@@ -624,7 +683,7 @@ function getManeuverFocusInstruction() {
 function getRouteViewBox(routePoint, boundsForRoute) {
   if (!routePoint || !getManeuverFocusInstruction()) return { x: 0, y: 0, width: 100, height: 100, zoomed: false };
   const car = project(routePoint, boundsForRoute);
-  const size = MANEUVER_VIEWBOX_SIZE;
+  const size = maneuverViewBoxSize(routePoint, boundsForRoute);
   return {
     x: car.x - size / 2,
     y: car.y - size / 2,
@@ -1062,6 +1121,7 @@ el.gpsBtn.addEventListener("click", startGps);
 el.menuBtn.addEventListener("click", () => el.drawer.classList.add("open"));
 el.closeMenuBtn.addEventListener("click", () => el.drawer.classList.remove("open"));
 el.voiceBtn.addEventListener("click", () => speak("Lektor działa"));
+el.maneuverZoomInput.addEventListener("input", event => setManeuverZoomRadius(event.target.value));
 el.clearBtn.addEventListener("click", clearRoute);
 el.panelHandle.addEventListener("click", togglePanel);
 el.panelToggleBtn.addEventListener("click", togglePanel);
@@ -1088,6 +1148,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => scheduleRender(true), 180);
 });
 
+loadSettings();
 updateSavedInfo();
 setPanelOpen(true);
 scheduleRender(true);
