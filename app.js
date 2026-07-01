@@ -777,6 +777,29 @@ function polyline(coords, b) {
   }).join(" ");
 }
 
+function pathData(coords, b, smooth = false) {
+  const points = coords.map(p => project(p, b));
+  if (!points.length) return "";
+  const start = points[0];
+  if (points.length === 1) return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`;
+  if (!smooth || points.length < 3) {
+    return points
+      .map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(" ");
+  }
+  const commands = [`M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`];
+  for (let i = 1; i < points.length - 1; i++) {
+    const current = points[i];
+    const next = points[i + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    commands.push(`Q ${current.x.toFixed(2)} ${current.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`);
+  }
+  const last = points[points.length - 1];
+  commands.push(`L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
+  return commands.join(" ");
+}
+
 function render(force = false) {
   const route = state.route;
   const routeId = route?.createdAt || "none";
@@ -815,10 +838,11 @@ function render(force = false) {
     ...(route.nearbyRoads || []).flatMap(road => road.coords || [])
   ];
   const b = bounds(visibleCoords.length ? visibleCoords : coords);
-  const all = polyline(coords, b);
   const doneCoords = coords.filter((_, index) => state.cumulative[index] <= state.progressKm);
   const point = routePointAt(state.progressKm);
   const viewBox = getRouteViewBox(point, b);
+  const smoothRoute = viewBox.zoomed;
+  const all = pathData(coords, b, smoothRoute);
   applySvgViewBox(viewBox);
   applyRouteCamera();
 
@@ -826,10 +850,10 @@ function render(force = false) {
     if (!road.coords?.length) continue;
     el.svg.insertAdjacentHTML("beforeend", `<polyline class="nearby-road" points="${polyline(road.coords, b)}"><title>${road.name || "Droga OSM"}</title></polyline>`);
   }
-  el.svg.insertAdjacentHTML("beforeend", `<polyline class="route-bg" points="${all}"></polyline>`);
-  el.svg.insertAdjacentHTML("beforeend", `<polyline class="route-line" points="${all}"></polyline>`);
+  el.svg.insertAdjacentHTML("beforeend", `<path class="route-bg" d="${all}"></path>`);
+  el.svg.insertAdjacentHTML("beforeend", `<path class="route-line" d="${all}"></path>`);
   if (doneCoords.length > 1) {
-    el.svg.insertAdjacentHTML("beforeend", `<polyline class="route-done" points="${polyline(doneCoords, b)}"></polyline>`);
+    el.svg.insertAdjacentHTML("beforeend", `<path class="route-done" d="${pathData(doneCoords, b, smoothRoute)}"></path>`);
   }
   for (const marker of [coords[0], coords[coords.length - 1]]) {
     const q = project(marker, b);
