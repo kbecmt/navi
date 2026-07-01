@@ -866,9 +866,7 @@ function render(force = false) {
     el.vehicle.style.display = "grid";
     el.vehicle.style.left = `${screen.x}px`;
     el.vehicle.style.top = `${screen.y}px`;
-    el.vehicle.style.transform = viewBox.zoomed
-      ? "translate(-50%, -50%)"
-      : `translate(-50%, -50%) rotate(${point.bearing}deg)`;
+    el.vehicle.style.transform = `translate(-50%, -50%) rotate(${point.bearing}deg)`;
   }
 
   const percent = state.totalKm ? Math.round((state.progressKm / state.totalKm) * 100) : 0;
