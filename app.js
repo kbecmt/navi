@@ -26,6 +26,10 @@ const MOTION_EPSILON_KM = 0.0007;
 const LITE_RENDER_INTERVAL_MS = 1500;
 const LITE_MOTION_INTERVAL_MS = 180;
 const DEVICE_MONITOR_INTERVAL_MS = 2500;
+const SPEECH_QUEUE_LIMIT = 6;
+const SPEECH_WATCHDOG_MS = 4500;
+const DEFAULT_MANEUVER_NOTIFY_DISTANCE_M = 120;
+const DEFAULT_MANEUVER_REMINDER_DELAY_SEC = 12;
 const DEFAULT_POI_NOTIFY_DISTANCE_M = 800;
 const DEFAULT_CAMERA_NOTIFY_DISTANCE_M = 1200;
 const DEFAULT_MAX_DRIVING_SPEED_KMH = 90;
@@ -64,6 +68,9 @@ const state = {
   lastSpeedAlertAt: 0,
   nextInstructionIndex: 0,
   lastSpokenInstruction: -1,
+  lastManeuverAlertAt: 0,
+  maneuverReminderSpoken: false,
+  maneuverReminderTimer: null,
   lastRenderKey: "",
   renderTimer: null,
   lastRenderAt: 0,
@@ -72,6 +79,15 @@ const state = {
   cameraBearing: null,
   vehicleBearing: null,
   battery: null,
+  speech: {
+    unlocked: false,
+    queue: [],
+    voices: [],
+    voice: null,
+    speaking: false,
+    watchdog: null,
+    lastStartedAt: 0
+  },
   deviceMonitor: {
     lastFrameAt: 0,
     frameSamples: [],
@@ -80,6 +96,8 @@ const state = {
   settings: {
     maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM,
     powerMode: "full",
+    maneuverNotifyDistanceM: DEFAULT_MANEUVER_NOTIFY_DISTANCE_M,
+    maneuverReminderDelaySec: DEFAULT_MANEUVER_REMINDER_DELAY_SEC,
     poiNotifyDistanceM: DEFAULT_POI_NOTIFY_DISTANCE_M,
     cameraNotifyDistanceM: DEFAULT_CAMERA_NOTIFY_DISTANCE_M,
     maxDrivingSpeedKmh: DEFAULT_MAX_DRIVING_SPEED_KMH,
@@ -124,6 +142,10 @@ const el = {
   voiceBtn: document.getElementById("voiceBtn"),
   powerModeInput: document.getElementById("powerModeInput"),
   powerModeValue: document.getElementById("powerModeValue"),
+  maneuverNotifyInput: document.getElementById("maneuverNotifyInput"),
+  maneuverNotifyValue: document.getElementById("maneuverNotifyValue"),
+  maneuverReminderInput: document.getElementById("maneuverReminderInput"),
+  maneuverReminderValue: document.getElementById("maneuverReminderValue"),
   poiNotifyInput: document.getElementById("poiNotifyInput"),
   poiNotifyValue: document.getElementById("poiNotifyValue"),
   cameraNotifyInput: document.getElementById("cameraNotifyInput"),
@@ -317,6 +339,8 @@ function loadSettings() {
     if (Number.isFinite(radius)) {
       state.settings.maneuverViewRadiusKm = clamp(radius, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
     }
+    state.settings.maneuverNotifyDistanceM = clampNumber(saved.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000);
+    state.settings.maneuverReminderDelaySec = clampNumber(saved.maneuverReminderDelaySec, DEFAULT_MANEUVER_REMINDER_DELAY_SEC, 3, 60);
     state.settings.poiNotifyDistanceM = clamp(Number(saved.poiNotifyDistanceM) || DEFAULT_POI_NOTIFY_DISTANCE_M, 50, 5000);
     state.settings.cameraNotifyDistanceM = clamp(Number(saved.cameraNotifyDistanceM) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
     state.settings.maxDrivingSpeedKmh = clampNumber(saved.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
@@ -328,6 +352,8 @@ function loadSettings() {
   } catch (_) {
     state.settings.maneuverViewRadiusKm = DEFAULT_MANEUVER_VIEW_RADIUS_KM;
     state.settings.powerMode = "full";
+    state.settings.maneuverNotifyDistanceM = DEFAULT_MANEUVER_NOTIFY_DISTANCE_M;
+    state.settings.maneuverReminderDelaySec = DEFAULT_MANEUVER_REMINDER_DELAY_SEC;
     state.settings.poiNotifyDistanceM = DEFAULT_POI_NOTIFY_DISTANCE_M;
     state.settings.cameraNotifyDistanceM = DEFAULT_CAMERA_NOTIFY_DISTANCE_M;
     state.settings.maxDrivingSpeedKmh = DEFAULT_MAX_DRIVING_SPEED_KMH;
@@ -349,6 +375,14 @@ function updateSettingsUi() {
   }
   if (el.powerModeInput) el.powerModeInput.value = state.settings.powerMode;
   if (el.powerModeValue) el.powerModeValue.textContent = powerModeLabel();
+  if (el.maneuverNotifyInput && el.maneuverNotifyValue) {
+    el.maneuverNotifyInput.value = String(state.settings.maneuverNotifyDistanceM);
+    el.maneuverNotifyValue.textContent = fmtKm(state.settings.maneuverNotifyDistanceM / 1000);
+  }
+  if (el.maneuverReminderInput && el.maneuverReminderValue) {
+    el.maneuverReminderInput.value = String(state.settings.maneuverReminderDelaySec);
+    el.maneuverReminderValue.textContent = `${state.settings.maneuverReminderDelaySec} s`;
+  }
   if (el.poiNotifyInput && el.poiNotifyValue) {
     el.poiNotifyInput.value = String(state.settings.poiNotifyDistanceM);
     el.poiNotifyValue.textContent = fmtKm(state.settings.poiNotifyDistanceM / 1000);
@@ -379,6 +413,22 @@ function setManeuverZoomRadius(value) {
   updateSettingsUi();
   saveSettings();
   scheduleRender(true);
+}
+
+function setManeuverNotifyDistance(value) {
+  state.settings.maneuverNotifyDistanceM = clampNumber(value, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000);
+  updateSettingsUi();
+  saveSettings();
+  scheduleRender(true);
+}
+
+function setManeuverReminderDelay(value) {
+  state.settings.maneuverReminderDelaySec = clampNumber(value, DEFAULT_MANEUVER_REMINDER_DELAY_SEC, 3, 60);
+  updateSettingsUi();
+  saveSettings();
+  if (state.lastSpokenInstruction >= 0 && !state.maneuverReminderSpoken) {
+    scheduleManeuverReminder(state.lastSpokenInstruction);
+  }
 }
 
 function setPoiNotifyDistance(value) {
@@ -518,15 +568,137 @@ function gpsErrorMessage(error) {
   return error?.message || "Nie udało się pobrać lokalizacji GPS";
 }
 
-function speak(text) {
-  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+function speechSupported() {
+  return "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+}
+
+function loadSpeechVoices() {
+  if (!speechSupported()) return [];
+  const voices = window.speechSynthesis.getVoices() || [];
+  state.speech.voices = voices;
+  state.speech.voice = voices.find(voice => voice.lang === "pl-PL")
+    || voices.find(voice => voice.lang?.toLowerCase().startsWith("pl"))
+    || voices.find(voice => voice.default)
+    || voices[0]
+    || null;
+  return voices;
+}
+
+function createSpeechUtterance(text, { volume = 1 } = {}) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = state.speech.voice?.lang || "pl-PL";
+  utterance.voice = state.speech.voice;
+  utterance.rate = 0.92;
+  utterance.pitch = 1;
+  utterance.volume = volume;
+  return utterance;
+}
+
+function startSpeechWatchdog() {
+  if (state.speech.watchdog) return;
+  state.speech.watchdog = setInterval(() => {
+    if (!speechSupported()) return;
+    const synth = window.speechSynthesis;
+    if (synth.paused) synth.resume();
+    if (state.speech.speaking && Date.now() - state.speech.lastStartedAt > 20000) {
+      state.speech.speaking = false;
+      flushSpeechQueue();
+    }
+  }, SPEECH_WATCHDOG_MS);
+}
+
+function flushSpeechQueue() {
+  if (!speechSupported() || !state.speech.unlocked || state.speech.speaking || !state.speech.queue.length) return;
+  const synth = window.speechSynthesis;
+  loadSpeechVoices();
+  const text = state.speech.queue.shift();
+  const utterance = createSpeechUtterance(text);
+  state.speech.speaking = true;
+  state.speech.lastStartedAt = Date.now();
+  utterance.onend = () => {
+    state.speech.speaking = false;
+    setTimeout(flushSpeechQueue, 120);
+  };
+  utterance.onerror = () => {
+    state.speech.speaking = false;
+    setTimeout(flushSpeechQueue, 250);
+  };
   try {
-    window.speechSynthesis.cancel();
-    const msg = new SpeechSynthesisUtterance(text);
-    msg.lang = "pl-PL";
-    msg.rate = 0.95;
-    window.speechSynthesis.speak(msg);
-  } catch (_) {}
+    synth.resume();
+    synth.speak(utterance);
+  } catch (_) {
+    state.speech.speaking = false;
+  }
+}
+
+function unlockSpeech(announce = false) {
+  if (!speechSupported()) {
+    showStatus("Brak lektora w tej przeglądarce");
+    return false;
+  }
+  try {
+    const synth = window.speechSynthesis;
+    loadSpeechVoices();
+    synth.cancel();
+    synth.resume();
+    state.speech.unlocked = true;
+    state.speech.speaking = false;
+    state.speech.queue = [];
+    startSpeechWatchdog();
+    if (announce) speak("Lektor działa");
+    else flushSpeechQueue();
+    return true;
+  } catch (_) {
+    showStatus("Nie udało się uruchomić lektora");
+    return false;
+  }
+}
+
+function primeSpeechFromGesture() {
+  if (state.speech.unlocked || !speechSupported()) return;
+  try {
+    const synth = window.speechSynthesis;
+    loadSpeechVoices();
+    synth.resume();
+    state.speech.unlocked = true;
+    const primer = createSpeechUtterance(".", { volume: 0 });
+    state.speech.speaking = true;
+    state.speech.lastStartedAt = Date.now();
+    primer.onend = () => {
+      state.speech.speaking = false;
+      flushSpeechQueue();
+    };
+    primer.onerror = () => {
+      state.speech.speaking = false;
+      flushSpeechQueue();
+    };
+    synth.speak(primer);
+    startSpeechWatchdog();
+  } catch (_) {
+    state.speech.speaking = false;
+  }
+}
+
+function speak(text) {
+  if (!speechSupported() || !text) return;
+  loadSpeechVoices();
+  state.speech.queue.push(String(text));
+  if (state.speech.queue.length > SPEECH_QUEUE_LIMIT) {
+    state.speech.queue.splice(0, state.speech.queue.length - SPEECH_QUEUE_LIMIT);
+  }
+  if (!state.speech.unlocked) {
+    showStatus("Dotknij Test lektora, żeby włączyć głos na telefonie");
+    return;
+  }
+  flushSpeechQueue();
+}
+
+if (speechSupported()) {
+  loadSpeechVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", () => {
+    loadSpeechVoices();
+    flushSpeechQueue();
+  });
 }
 
 function getCurrentPosition() {
@@ -1149,6 +1321,31 @@ function routeNoticeText() {
   return shouldFetchRouteExtras() ? nextRouteNotice() : "";
 }
 
+function resetManeuverVoiceState() {
+  if (state.maneuverReminderTimer) clearTimeout(state.maneuverReminderTimer);
+  state.lastSpokenInstruction = -1;
+  state.lastManeuverAlertAt = 0;
+  state.maneuverReminderSpoken = false;
+  state.maneuverReminderTimer = null;
+}
+
+function scheduleManeuverReminder(index) {
+  if (state.maneuverReminderTimer) clearTimeout(state.maneuverReminderTimer);
+  const delayMs = clampNumber(state.settings.maneuverReminderDelaySec, DEFAULT_MANEUVER_REMINDER_DELAY_SEC, 3, 60) * 1000;
+  state.maneuverReminderTimer = setTimeout(() => {
+    state.maneuverReminderTimer = null;
+    if (state.lastSpokenInstruction !== index || state.maneuverReminderSpoken) return;
+    const current = getNextInstruction();
+    if (!current || state.nextInstructionIndex !== index) return;
+    const distKm = Math.max(0, current.doneKm - state.progressKm);
+    const notifyDistanceKm = clampNumber(state.settings.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000) / 1000;
+    if (distKm > 0.02 && distKm <= notifyDistanceKm) {
+      state.maneuverReminderSpoken = true;
+      speak(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`);
+    }
+  }, delayMs);
+}
+
 function scheduleRender(force = false) {
   if (force) {
     if (state.renderTimer) clearTimeout(state.renderTimer);
@@ -1430,9 +1627,25 @@ function renderManeuver() {
   el.laneGuide.classList.toggle("visible", lanes.length > 0);
   const notice = routeNoticeText();
   el.nextManeuverText.textContent = [next ? `Potem: ${next.text}` : "", notice].filter(Boolean).join(" · ");
-  if (distKm < 0.08 && state.lastSpokenInstruction !== state.nextInstructionIndex) {
+  const notifyDistanceKm = clampNumber(state.settings.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000) / 1000;
+  const isInNotifyRange = distKm <= notifyDistanceKm;
+  if (isInNotifyRange && state.lastSpokenInstruction !== state.nextInstructionIndex) {
     state.lastSpokenInstruction = state.nextInstructionIndex;
+    state.lastManeuverAlertAt = Date.now();
+    state.maneuverReminderSpoken = false;
+    scheduleManeuverReminder(state.nextInstructionIndex);
     speak(current.type === "arrive" ? `Za ${fmtKm(distKm)} dotrzesz do celu` : `Za ${fmtKm(distKm)}, ${current.text}`);
+  } else if (
+    isInNotifyRange &&
+    state.lastSpokenInstruction === state.nextInstructionIndex &&
+    !state.maneuverReminderSpoken &&
+    Date.now() - state.lastManeuverAlertAt >= state.settings.maneuverReminderDelaySec * 1000 &&
+    distKm > 0.02
+  ) {
+    if (state.maneuverReminderTimer) clearTimeout(state.maneuverReminderTimer);
+    state.maneuverReminderTimer = null;
+    state.maneuverReminderSpoken = true;
+    speak(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`);
   }
 }
 
@@ -1498,7 +1711,7 @@ function previewRouteChoice(index = 0) {
   state.currentLimit = null;
   state.lastSpeedAlertAt = 0;
   state.nextInstructionIndex = 0;
-  state.lastSpokenInstruction = -1;
+  resetManeuverVoiceState();
   resetMotionProgress(0);
   renderRouteChoices();
   scheduleRender(true);
@@ -1519,7 +1732,7 @@ async function selectRouteChoice(index) {
   state.currentLimit = null;
   state.lastSpeedAlertAt = 0;
   state.nextInstructionIndex = 0;
-  state.lastSpokenInstruction = -1;
+  resetManeuverVoiceState();
   resetMotionProgress(0);
   renderRouteChoices();
   if (!shouldFetchRouteExtras()) {
@@ -1674,7 +1887,7 @@ function applySavedRoute(saved) {
   state.progressKm = Math.min(saved.progressKm || 0, state.totalKm);
   state.speedKmh = 0;
   state.nextInstructionIndex = 0;
-  state.lastSpokenInstruction = -1;
+  resetManeuverVoiceState();
   state.routeChoices = [];
   state.activeRouteChoiceIndex = -1;
   renderRouteChoices();
@@ -1777,7 +1990,7 @@ function startSimulation() {
   state.progressKm = 0;
   resetMotionProgress(0);
   state.nextInstructionIndex = 0;
-  state.lastSpokenInstruction = -1;
+  resetManeuverVoiceState();
   showStatus("Symulacja jazdy");
   speak("Symulacja rozpoczęta");
   let last = performance.now();
@@ -1881,7 +2094,7 @@ function clearRoute() {
   state.currentLimit = null;
   state.lastSpeedAlertAt = 0;
   state.nextInstructionIndex = 0;
-  state.lastSpokenInstruction = -1;
+  resetManeuverVoiceState();
   localStorage.removeItem(STORE_KEY);
   showStatus("Brak trasy");
   updateSavedInfo();
@@ -1890,16 +2103,25 @@ function clearRoute() {
   setPanelOpen(true);
 }
 
-el.routeBtn.addEventListener("click", createRoute);
+el.routeBtn.addEventListener("click", () => {
+  primeSpeechFromGesture();
+  createRoute();
+});
 el.locateBtn.addEventListener("click", () => locateStart().catch(error => alert(error.message)));
 el.saveBtn.addEventListener("click", saveRoute);
 el.loadBtn.addEventListener("click", () => loadRoute());
-el.simBtn.addEventListener("click", startSimulation);
+el.simBtn.addEventListener("click", () => {
+  primeSpeechFromGesture();
+  startSimulation();
+});
 el.stopBtn.addEventListener("click", stopAll);
-el.gpsBtn.addEventListener("click", startGps);
+el.gpsBtn.addEventListener("click", () => {
+  primeSpeechFromGesture();
+  startGps();
+});
 el.menuBtn.addEventListener("click", () => el.drawer.classList.add("open"));
 el.closeMenuBtn.addEventListener("click", () => el.drawer.classList.remove("open"));
-el.voiceBtn.addEventListener("click", () => speak("Lektor działa"));
+el.voiceBtn.addEventListener("click", () => unlockSpeech(true));
 el.powerModeInput.addEventListener("change", event => setPowerMode(event.target.value));
 el.routeChoices.addEventListener("click", event => {
   const preview = event.target.closest("[data-route-preview]");
@@ -1925,6 +2147,8 @@ el.savedInfo.addEventListener("click", event => {
   if (remove) deleteSavedRoute(remove.dataset.savedDelete);
 });
 el.maneuverZoomInput.addEventListener("input", event => setManeuverZoomRadius(event.target.value));
+if (el.maneuverNotifyInput) el.maneuverNotifyInput.addEventListener("input", event => setManeuverNotifyDistance(event.target.value));
+if (el.maneuverReminderInput) el.maneuverReminderInput.addEventListener("input", event => setManeuverReminderDelay(event.target.value));
 if (el.poiNotifyInput) el.poiNotifyInput.addEventListener("input", event => setPoiNotifyDistance(event.target.value));
 if (el.cameraNotifyInput) el.cameraNotifyInput.addEventListener("input", event => setCameraNotifyDistance(event.target.value));
 if (el.maxSpeedInput) el.maxSpeedInput.addEventListener("input", event => setMaxDrivingSpeed(event.target.value));

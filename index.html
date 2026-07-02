@@ -82,7 +82,7 @@
         <h2>Menu</h2>
         <button id="closeMenuBtn" type="button" aria-label="Zamknij">×</button>
       </div>
-      <button id="voiceBtn" type="button">Test lektora</button>
+      <button id="voiceBtn" type="button">Włącz / test lektora</button>
       <label class="drawer-setting">
         Tryb pracy
         <select id="powerModeInput">
@@ -114,6 +114,16 @@
         Drogi wokół trasy
         <input id="roadRadiusInput" type="range" min="0" max="2000" step="50" value="500">
         <strong id="roadRadiusValue">500 m</strong>
+      </label>
+      <label class="drawer-setting">
+        Powiadomienie manewru wcześniej
+        <input id="maneuverNotifyInput" type="range" min="20" max="2000" step="10" value="120">
+        <strong id="maneuverNotifyValue">120 m</strong>
+      </label>
+      <label class="drawer-setting">
+        Przypomnienie manewru po
+        <input id="maneuverReminderInput" type="range" min="3" max="60" step="1" value="12">
+        <strong id="maneuverReminderValue">12 s</strong>
       </label>
       <label class="drawer-setting">
         Powiadomienie POI wcześniej
