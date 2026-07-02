@@ -94,6 +94,7 @@ const state = {
     unlocked: false,
     lastSignalAt: 0
   },
+  wakeLock: null,
   deviceMonitor: {
     lastFrameAt: 0,
     frameSamples: [],
@@ -573,6 +574,37 @@ function startDeviceMonitor() {
   requestAnimationFrame(sampleDeviceFrame);
   state.deviceMonitor.timer = setInterval(renderDeviceStatus, DEVICE_MONITOR_INTERVAL_MS);
   initBatteryStatus();
+}
+
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || state.wakeLock) return;
+  try {
+    state.wakeLock = await navigator.wakeLock.request("screen");
+    state.wakeLock.addEventListener("release", () => {
+      state.wakeLock = null;
+    });
+  } catch (_) {
+    state.wakeLock = null;
+  }
+}
+
+function releaseWakeLock() {
+  if (!state.wakeLock) return;
+  const lock = state.wakeLock;
+  state.wakeLock = null;
+  lock.release().catch(() => {});
+}
+
+function updateWakeLock() {
+  if (state.gpsWatch !== null || state.simulation) requestWakeLock();
+  else releaseWakeLock();
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
 }
 
 function setPanelOpen(open) {
@@ -2115,6 +2147,7 @@ function startSimulation() {
     startMotionAnimation();
     scheduleRender();
   }, 1000);
+  updateWakeLock();
 }
 
 function stopSimulation() {
@@ -2122,6 +2155,7 @@ function stopSimulation() {
   state.simulation = null;
   el.simBtn.classList.remove("running");
   el.simBtn.textContent = "Symuluj";
+  updateWakeLock();
 }
 
 function stopAll() {
@@ -2132,6 +2166,7 @@ function stopAll() {
   state.currentLimit = null;
   markProgressUpdated();
   showStatus(state.route ? "Trasa zatrzymana" : "Brak trasy");
+  updateWakeLock();
   startMotionAnimation();
   scheduleRender(true);
 }
@@ -2144,6 +2179,7 @@ function startGps() {
     navigator.geolocation.clearWatch(state.gpsWatch);
     state.gpsWatch = null;
     showStatus("GPS wyłączony");
+    updateWakeLock();
     return;
   }
   showStatus("GPS aktywny");
@@ -2172,6 +2208,7 @@ function startGps() {
     showStatus("Błąd GPS");
     alert(gpsErrorMessage(error));
   }, { enableHighAccuracy: true, timeout: 9000, maximumAge: 2500 });
+  updateWakeLock();
 }
 
 function clearRoute() {
@@ -2282,9 +2319,13 @@ window.addEventListener("resize", () => {
   if (resizeTimer) clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => scheduleRender(true), 180);
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") updateWakeLock();
+});
 
 loadSettings();
 updateSavedInfo();
 startDeviceMonitor();
+registerServiceWorker();
 setPanelOpen(true);
 scheduleRender(true);
