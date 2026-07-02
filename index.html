@@ -62,6 +62,7 @@
             <input id="destInput" autocomplete="street-address" placeholder="Wpisz cel">
           </label>
           <button id="routeBtn" type="button">Wyznacz trasę z GPS</button>
+          <div id="routeChoices" aria-live="polite"></div>
         </div>
       </div>
 
@@ -83,10 +84,54 @@
       </div>
       <button id="voiceBtn" type="button">Test lektora</button>
       <label class="drawer-setting">
+        Tryb pracy
+        <select id="powerModeInput">
+          <option value="full">Pełny</option>
+          <option value="lite">Lite</option>
+          <option value="mega">Mega Lite</option>
+          <option value="ultra">Ultra Lite</option>
+        </select>
+        <strong id="powerModeValue">Pełny</strong>
+      </label>
+      <div id="devicePanel" class="drawer-setting device-panel">
+        <strong>Stan urządzenia</strong>
+        <div><span>Temperatura</span><b id="deviceTempText">Brak dostępu</b></div>
+        <div><span>Bateria</span><b id="batteryText">--</b></div>
+        <div><span>Obciążenie</span><b id="loadText">--</b></div>
+        <small id="deviceHint">Strona WWW nie ma dostępu do czujnika temperatury telefonu.</small>
+      </div>
+      <label class="drawer-setting">
         Promień zoomu skrzyżowania
-        <input id="maneuverZoomInput" type="range" min="0.2" max="2" step="0.1" value="1">
+        <input id="maneuverZoomInput" type="range" min="0.01" max="2" step="0.01" value="1">
         <strong id="maneuverZoomValue">1.0 km</strong>
       </label>
+      <label class="drawer-setting">
+        Maksymalna prędkość jazdy
+        <input id="maxSpeedInput" type="range" min="20" max="180" step="5" value="90">
+        <strong id="maxSpeedValue">90 km/h</strong>
+      </label>
+      <label class="drawer-setting">
+        Drogi wokół trasy
+        <input id="roadRadiusInput" type="range" min="0" max="2000" step="50" value="500">
+        <strong id="roadRadiusValue">500 m</strong>
+      </label>
+      <label class="drawer-setting">
+        Powiadomienie POI wcześniej
+        <input id="poiNotifyInput" type="range" min="50" max="5000" step="50" value="800">
+        <strong id="poiNotifyValue">800 m</strong>
+      </label>
+      <label class="drawer-setting">
+        Powiadomienie radarów wcześniej
+        <input id="cameraNotifyInput" type="range" min="50" max="5000" step="50" value="1200">
+        <strong id="cameraNotifyValue">1.2 km</strong>
+      </label>
+      <div class="drawer-setting poi-settings">
+        <strong>Wczytywane POI</strong>
+        <label><input type="checkbox" data-poi-type="fuel" checked> Paliwo</label>
+        <label><input type="checkbox" data-poi-type="parking" checked> Parking</label>
+        <label><input type="checkbox" data-poi-type="food" checked> Jedzenie</label>
+        <label><input type="checkbox" data-poi-type="help" checked> Pomoc</label>
+      </div>
       <button id="clearBtn" type="button">Wyczyść trasę</button>
       <div id="savedInfo">Zapis: brak</div>
     </aside>

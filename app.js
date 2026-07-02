@@ -5,6 +5,7 @@ const OVERPASS_URLS = [
   "https://overpass.kumi.systems/api/interpreter"
 ];
 const STORE_KEY = "simpleNaviRoute";
+const ROUTES_STORE_KEY = "simpleNaviRoutes";
 const SETTINGS_KEY = "simpleNaviSettings";
 const SIM_MIN_MS = 25000;
 const SIM_MAX_MS = 120000;
@@ -12,20 +13,40 @@ const SIM_MAX_SPEED_KMH = 100;
 const MANEUVER_ZOOM_BEFORE_KM = 0.3;
 const MANEUVER_ZOOM_AFTER_KM = 0.1;
 const DEFAULT_MANEUVER_VIEW_RADIUS_KM = 1;
+const MIN_MANEUVER_VIEW_RADIUS_KM = 0.01;
+const MAX_MANEUVER_VIEW_RADIUS_KM = 2;
 const MIN_RENDER_INTERVAL_MS = 900;
 const GPS_RENDER_STEP_KM = 0.008;
 const GPS_SPEED_RENDER_STEP_KMH = 5;
-const NEARBY_ROAD_MAX_DISTANCE_KM = 0.5;
 const VISUAL_PREDICT_SECONDS = 0.9;
 const CAMERA_LOOKAHEAD_SECONDS = 4.2;
 const CAMERA_LOOKAHEAD_MIN_KM = 0.025;
 const CAMERA_LOOKAHEAD_MAX_KM = 0.18;
 const MOTION_EPSILON_KM = 0.0007;
+const LITE_RENDER_INTERVAL_MS = 1500;
+const LITE_MOTION_INTERVAL_MS = 180;
+const DEVICE_MONITOR_INTERVAL_MS = 2500;
+const DEFAULT_POI_NOTIFY_DISTANCE_M = 800;
+const DEFAULT_CAMERA_NOTIFY_DISTANCE_M = 1200;
+const DEFAULT_MAX_DRIVING_SPEED_KMH = 90;
+const DEFAULT_NEARBY_ROAD_RADIUS_M = 500;
+const DEFAULT_POI_TYPES = ["fuel", "parking", "food", "help"];
+const POI_TYPE_CONFIG = {
+  fuel: { label: "Paliwo", overpass: 'node["amenity"="fuel"]({bbox});way["amenity"="fuel"]({bbox});' },
+  parking: { label: "Parking", overpass: 'node["amenity"="parking"]({bbox});way["amenity"="parking"]({bbox});' },
+  food: { label: "Jedzenie", overpass: 'node["amenity"~"restaurant|cafe"]({bbox});way["amenity"~"restaurant|cafe"]({bbox});' },
+  help: { label: "Pomoc", overpass: 'node["amenity"~"pharmacy|hospital"]({bbox});way["amenity"~"pharmacy|hospital"]({bbox});' }
+};
 
 const state = {
   start: null,
   dest: null,
   route: null,
+  activeSavedRouteId: null,
+  routeChoices: [],
+  routeChoiceStart: null,
+  routeChoiceDest: null,
+  activeRouteChoiceIndex: -1,
   cumulative: [],
   totalKm: 0,
   progressKm: 0,
@@ -33,6 +54,7 @@ const state = {
   cameraProgressKm: 0,
   progressUpdatedAt: 0,
   motionFrame: null,
+  motionTimer: null,
   lastMotionFrameAt: 0,
   simulation: null,
   gpsWatch: null,
@@ -46,10 +68,23 @@ const state = {
   renderTimer: null,
   lastRenderAt: 0,
   lastRenderedSpeedKmh: 0,
+  lastMotionRenderAt: 0,
   cameraBearing: null,
   vehicleBearing: null,
+  battery: null,
+  deviceMonitor: {
+    lastFrameAt: 0,
+    frameSamples: [],
+    timer: null
+  },
   settings: {
-    maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM
+    maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM,
+    powerMode: "full",
+    poiNotifyDistanceM: DEFAULT_POI_NOTIFY_DISTANCE_M,
+    cameraNotifyDistanceM: DEFAULT_CAMERA_NOTIFY_DISTANCE_M,
+    maxDrivingSpeedKmh: DEFAULT_MAX_DRIVING_SPEED_KMH,
+    nearbyRoadRadiusM: DEFAULT_NEARBY_ROAD_RADIUS_M,
+    poiTypes: [...DEFAULT_POI_TYPES]
   }
 };
 
@@ -74,6 +109,7 @@ const el = {
   dest: document.getElementById("destInput"),
   locateBtn: document.getElementById("locateBtn"),
   routeBtn: document.getElementById("routeBtn"),
+  routeChoices: document.getElementById("routeChoices"),
   gpsBtn: document.getElementById("gpsBtn"),
   saveBtn: document.getElementById("saveBtn"),
   loadBtn: document.getElementById("loadBtn"),
@@ -86,6 +122,21 @@ const el = {
   menuBtn: document.getElementById("menuBtn"),
   closeMenuBtn: document.getElementById("closeMenuBtn"),
   voiceBtn: document.getElementById("voiceBtn"),
+  powerModeInput: document.getElementById("powerModeInput"),
+  powerModeValue: document.getElementById("powerModeValue"),
+  poiNotifyInput: document.getElementById("poiNotifyInput"),
+  poiNotifyValue: document.getElementById("poiNotifyValue"),
+  cameraNotifyInput: document.getElementById("cameraNotifyInput"),
+  cameraNotifyValue: document.getElementById("cameraNotifyValue"),
+  maxSpeedInput: document.getElementById("maxSpeedInput"),
+  maxSpeedValue: document.getElementById("maxSpeedValue"),
+  roadRadiusInput: document.getElementById("roadRadiusInput"),
+  roadRadiusValue: document.getElementById("roadRadiusValue"),
+  poiTypeInputs: Array.from(document.querySelectorAll("[data-poi-type]")),
+  deviceTempText: document.getElementById("deviceTempText"),
+  batteryText: document.getElementById("batteryText"),
+  loadText: document.getElementById("loadText"),
+  deviceHint: document.getElementById("deviceHint"),
   maneuverZoomInput: document.getElementById("maneuverZoomInput"),
   maneuverZoomValue: document.getElementById("maneuverZoomValue"),
   clearBtn: document.getElementById("clearBtn"),
@@ -122,6 +173,16 @@ function fmtTime(seconds) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h}h ${m}min` : `${m} min`;
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
 }
 
 function parseMaxspeed(value) {
@@ -193,15 +254,85 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function isLiteMode() {
+  return state.settings.powerMode === "lite" || state.settings.powerMode === "mega" || state.settings.powerMode === "ultra";
+}
+
+function isMegaLiteMode() {
+  return state.settings.powerMode === "mega";
+}
+
+function isUltraLiteMode() {
+  return state.settings.powerMode === "ultra";
+}
+
+function isNotificationOnlyMode() {
+  return isMegaLiteMode() || isUltraLiteMode();
+}
+
+function shouldFetchRouteExtras() {
+  return state.settings.powerMode === "full" || isMegaLiteMode();
+}
+
+function powerModeLabel(mode = state.settings.powerMode) {
+  if (mode === "ultra") return "Ultra Lite";
+  if (mode === "mega") return "Mega Lite";
+  if (mode === "lite") return "Lite";
+  return "Pełny";
+}
+
+function normalizePoiTypes(value) {
+  if (!Array.isArray(value)) return [...DEFAULT_POI_TYPES];
+  return [...new Set(value.filter(type => POI_TYPE_CONFIG[type]))];
+}
+
+function notifyKm(meters) {
+  return clamp(Number(meters) || 0, 50, 5000) / 1000;
+}
+
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  return clamp(Number.isFinite(number) ? number : fallback, min, max);
+}
+
+function roadRadiusKm() {
+  return clampNumber(state.settings.nearbyRoadRadiusM, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000) / 1000;
+}
+
+function maxSpeedDurationSec(distanceKm = state.totalKm) {
+  const speed = clampNumber(state.settings.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
+  return distanceKm > 0 ? distanceKm / speed * 3600 : 0;
+}
+
+function routeTimeHtml(route = state.route, distanceKm = state.totalKm) {
+  if (!route) return "--";
+  const speed = clampNumber(state.settings.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
+  return `${fmtTime(route.durationSec)}<small>max ${speed}: ${fmtTime(maxSpeedDurationSec(distanceKm))}</small>`;
+}
+
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     const radius = Number(saved.maneuverViewRadiusKm);
     if (Number.isFinite(radius)) {
-      state.settings.maneuverViewRadiusKm = clamp(radius, 0.2, 2);
+      state.settings.maneuverViewRadiusKm = clamp(radius, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
     }
+    state.settings.poiNotifyDistanceM = clamp(Number(saved.poiNotifyDistanceM) || DEFAULT_POI_NOTIFY_DISTANCE_M, 50, 5000);
+    state.settings.cameraNotifyDistanceM = clamp(Number(saved.cameraNotifyDistanceM) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
+    state.settings.maxDrivingSpeedKmh = clampNumber(saved.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
+    state.settings.nearbyRoadRadiusM = clampNumber(saved.nearbyRoadRadiusM, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000);
+    state.settings.poiTypes = normalizePoiTypes(saved.poiTypes);
+    state.settings.powerMode = ["full", "lite", "mega", "ultra"].includes(saved.powerMode)
+      ? saved.powerMode
+      : saved.liteMode === true ? "lite" : "full";
   } catch (_) {
     state.settings.maneuverViewRadiusKm = DEFAULT_MANEUVER_VIEW_RADIUS_KM;
+    state.settings.powerMode = "full";
+    state.settings.poiNotifyDistanceM = DEFAULT_POI_NOTIFY_DISTANCE_M;
+    state.settings.cameraNotifyDistanceM = DEFAULT_CAMERA_NOTIFY_DISTANCE_M;
+    state.settings.maxDrivingSpeedKmh = DEFAULT_MAX_DRIVING_SPEED_KMH;
+    state.settings.nearbyRoadRadiusM = DEFAULT_NEARBY_ROAD_RADIUS_M;
+    state.settings.poiTypes = [...DEFAULT_POI_TYPES];
   }
   updateSettingsUi();
 }
@@ -211,16 +342,160 @@ function saveSettings() {
 }
 
 function updateSettingsUi() {
-  if (!el.maneuverZoomInput || !el.maneuverZoomValue) return;
-  el.maneuverZoomInput.value = String(state.settings.maneuverViewRadiusKm);
-  el.maneuverZoomValue.textContent = `${state.settings.maneuverViewRadiusKm.toFixed(1)} km`;
+  if (el.maneuverZoomInput && el.maneuverZoomValue) {
+    el.maneuverZoomInput.value = String(state.settings.maneuverViewRadiusKm);
+    const radius = state.settings.maneuverViewRadiusKm;
+    el.maneuverZoomValue.textContent = `${radius < 0.1 ? radius.toFixed(2) : radius.toFixed(1)} km`;
+  }
+  if (el.powerModeInput) el.powerModeInput.value = state.settings.powerMode;
+  if (el.powerModeValue) el.powerModeValue.textContent = powerModeLabel();
+  if (el.poiNotifyInput && el.poiNotifyValue) {
+    el.poiNotifyInput.value = String(state.settings.poiNotifyDistanceM);
+    el.poiNotifyValue.textContent = fmtKm(state.settings.poiNotifyDistanceM / 1000);
+  }
+  if (el.cameraNotifyInput && el.cameraNotifyValue) {
+    el.cameraNotifyInput.value = String(state.settings.cameraNotifyDistanceM);
+    el.cameraNotifyValue.textContent = fmtKm(state.settings.cameraNotifyDistanceM / 1000);
+  }
+  if (el.maxSpeedInput && el.maxSpeedValue) {
+    el.maxSpeedInput.value = String(state.settings.maxDrivingSpeedKmh);
+    el.maxSpeedValue.textContent = `${state.settings.maxDrivingSpeedKmh} km/h`;
+  }
+  if (el.roadRadiusInput && el.roadRadiusValue) {
+    el.roadRadiusInput.value = String(state.settings.nearbyRoadRadiusM);
+    el.roadRadiusValue.textContent = fmtKm(state.settings.nearbyRoadRadiusM / 1000);
+  }
+  for (const input of el.poiTypeInputs || []) {
+    input.checked = state.settings.poiTypes.includes(input.dataset.poiType);
+  }
+  document.body.classList.toggle("lite-mode", isLiteMode());
+  document.body.classList.toggle("mega-lite-mode", isMegaLiteMode());
+  document.body.classList.toggle("ultra-lite-mode", isUltraLiteMode());
+  document.body.classList.toggle("notification-only-mode", isNotificationOnlyMode());
 }
 
 function setManeuverZoomRadius(value) {
-  state.settings.maneuverViewRadiusKm = clamp(Number(value) || DEFAULT_MANEUVER_VIEW_RADIUS_KM, 0.2, 2);
+  state.settings.maneuverViewRadiusKm = clamp(Number(value) || DEFAULT_MANEUVER_VIEW_RADIUS_KM, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
   updateSettingsUi();
   saveSettings();
   scheduleRender(true);
+}
+
+function setPoiNotifyDistance(value) {
+  state.settings.poiNotifyDistanceM = clamp(Number(value) || DEFAULT_POI_NOTIFY_DISTANCE_M, 50, 5000);
+  updateSettingsUi();
+  saveSettings();
+  scheduleRender(true);
+}
+
+function setCameraNotifyDistance(value) {
+  state.settings.cameraNotifyDistanceM = clamp(Number(value) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
+  updateSettingsUi();
+  saveSettings();
+  scheduleRender(true);
+}
+
+function setMaxDrivingSpeed(value) {
+  state.settings.maxDrivingSpeedKmh = clampNumber(value, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
+  updateSettingsUi();
+  saveSettings();
+  renderRouteChoices();
+  scheduleRender(true);
+}
+
+function setNearbyRoadRadius(value) {
+  state.settings.nearbyRoadRadiusM = clampNumber(value, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000);
+  updateSettingsUi();
+  saveSettings();
+  if (state.route) showStatus("Promień dróg zadziała przy kolejnym pobraniu trasy");
+}
+
+function setPoiType(type, enabled) {
+  const current = new Set(state.settings.poiTypes);
+  if (enabled) current.add(type);
+  else current.delete(type);
+  state.settings.poiTypes = normalizePoiTypes([...current]);
+  updateSettingsUi();
+  saveSettings();
+}
+
+function setPowerMode(mode) {
+  state.settings.powerMode = ["full", "lite", "mega", "ultra"].includes(mode) ? mode : "full";
+  updateSettingsUi();
+  saveSettings();
+  state.lastRenderKey = "";
+  state.lastMotionRenderAt = 0;
+  if (isNotificationOnlyMode()) stopMotionAnimation();
+  else startMotionAnimation();
+  showStatus(`Tryb ${powerModeLabel()} włączony`);
+  scheduleRender(true);
+}
+
+function renderDeviceStatus() {
+  if (el.deviceTempText) el.deviceTempText.textContent = "Brak dostępu";
+
+  if (el.batteryText) {
+    if (state.battery) {
+      const level = Math.round(state.battery.level * 100);
+      el.batteryText.textContent = state.battery.charging ? `${level}% ładuje` : `${level}%`;
+    } else {
+      el.batteryText.textContent = "Niedostępna";
+    }
+  }
+
+  if (el.loadText) {
+    const samples = state.deviceMonitor.frameSamples;
+    if (samples.length < 8) {
+      el.loadText.textContent = "--";
+    } else {
+      const avg = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+      const fps = Math.round(1000 / Math.max(16, avg));
+      const hot = avg > 42;
+      const warm = avg > 26;
+      el.loadText.textContent = hot ? `Wysokie (${fps} fps)` : warm ? `Średnie (${fps} fps)` : `OK (${fps} fps)`;
+      el.loadText.classList.toggle("warn", hot);
+    }
+  }
+
+  if (el.deviceHint) {
+    const highLoad = state.deviceMonitor.frameSamples.length &&
+      state.deviceMonitor.frameSamples.reduce((sum, value) => sum + value, 0) / state.deviceMonitor.frameSamples.length > 42;
+    el.deviceHint.textContent = highLoad && !isLiteMode()
+      ? "Telefon może się grzać: włącz Tryb Lite, żeby ograniczyć render i pobieranie."
+      : "Strona WWW nie ma dostępu do czujnika temperatury telefonu.";
+  }
+}
+
+async function initBatteryStatus() {
+  if (!navigator.getBattery) {
+    renderDeviceStatus();
+    return;
+  }
+  try {
+    state.battery = await navigator.getBattery();
+    ["chargingchange", "levelchange"].forEach(eventName => {
+      state.battery.addEventListener(eventName, renderDeviceStatus);
+    });
+  } catch (_) {
+    state.battery = null;
+  }
+  renderDeviceStatus();
+}
+
+function sampleDeviceFrame(now) {
+  const monitor = state.deviceMonitor;
+  if (monitor.lastFrameAt) {
+    monitor.frameSamples.push(now - monitor.lastFrameAt);
+    if (monitor.frameSamples.length > 45) monitor.frameSamples.shift();
+  }
+  monitor.lastFrameAt = now;
+  requestAnimationFrame(sampleDeviceFrame);
+}
+
+function startDeviceMonitor() {
+  requestAnimationFrame(sampleDeviceFrame);
+  state.deviceMonitor.timer = setInterval(renderDeviceStatus, DEVICE_MONITOR_INTERVAL_MS);
+  initBatteryStatus();
 }
 
 function setPanelOpen(open) {
@@ -401,7 +676,7 @@ function nearestProgress(point) {
   return best.km;
 }
 
-function buildInstructions(osrmRoute, coords) {
+function buildInstructions(osrmRoute, coords, totalKm = state.totalKm) {
   const items = [];
   for (const leg of osrmRoute.legs || []) {
     for (const step of leg.steps || []) {
@@ -430,7 +705,7 @@ function buildInstructions(osrmRoute, coords) {
     items.push({
       lat: last.lat,
       lng: last.lng,
-      doneKm: state.totalKm,
+      doneKm: totalKm,
       type: "arrive",
       modifier: "",
       arrow: "◎",
@@ -458,9 +733,13 @@ function routeBoundsWithMargin(coords, marginKm = 0.55) {
 
 function buildOverpassQuery(box) {
   const bbox = `${box.south},${box.west},${box.north},${box.east}`;
+  const poiQueries = state.settings.poiTypes
+    .map(type => POI_TYPE_CONFIG[type]?.overpass || "")
+    .filter(Boolean)
+    .map(query => query.split("{bbox}").join(bbox))
+    .join("\n");
   return `[out:json][timeout:18];(
-node["amenity"~"fuel|parking|restaurant|cafe|pharmacy|hospital"](${bbox});
-way["amenity"~"fuel|parking|restaurant|cafe|pharmacy|hospital"](${bbox});
+${poiQueries}
 node["highway"="speed_camera"](${bbox});
 way["highway"="speed_camera"](${bbox});
 node["enforcement"="maxspeed"](${bbox});
@@ -534,7 +813,7 @@ function normalizeRoadElement(item) {
 }
 
 async function fetchOverpassPoints(coords) {
-  const box = routeBoundsWithMargin(coords);
+  const box = routeBoundsWithMargin(coords, Math.max(0.3, roadRadiusKm()));
   if (!box) return [];
   const body = `data=${encodeURIComponent(buildOverpassQuery(box))}`;
   let lastError = null;
@@ -557,7 +836,11 @@ async function fetchOverpassPoints(coords) {
 
 async function loadRoutePoints(coords) {
   const rawElements = await fetchOverpassPoints(coords);
-  const raw = rawElements.map(normalizeOverpassElement).filter(Boolean);
+  const selectedPoiTypes = new Set(state.settings.poiTypes);
+  const raw = rawElements
+    .map(normalizeOverpassElement)
+    .filter(Boolean)
+    .filter(point => point.type === "camera" || selectedPoiTypes.has(point.type));
   const rawLimits = rawElements.map(normalizeSpeedLimitElement).filter(Boolean);
   const rawRoads = rawElements.map(normalizeRoadElement).filter(Boolean);
   const seen = new Set();
@@ -581,6 +864,7 @@ async function loadRoutePoints(coords) {
 
 function normalizeNearbyRoads(roads, routeCoords) {
   const cumulative = buildCumulative(routeCoords);
+  const maxDistanceKm = roadRadiusKm();
   const seen = new Set();
   return roads.map(road => {
     const measured = road.coords.map(point => {
@@ -594,13 +878,13 @@ function normalizeNearbyRoads(roads, routeCoords) {
     const distanceFromRoute = Math.min(...measured.map(item => item.distance));
     const coords = measured
       .filter((item, index, all) => (
-        item.distance <= NEARBY_ROAD_MAX_DISTANCE_KM ||
-        all[index - 1]?.distance <= NEARBY_ROAD_MAX_DISTANCE_KM ||
-        all[index + 1]?.distance <= NEARBY_ROAD_MAX_DISTANCE_KM
+        item.distance <= maxDistanceKm ||
+        all[index - 1]?.distance <= maxDistanceKm ||
+        all[index + 1]?.distance <= maxDistanceKm
       ))
       .map(item => item.point);
     return { ...road, coords, distanceFromRoute };
-  }).filter(road => road.distanceFromRoute <= NEARBY_ROAD_MAX_DISTANCE_KM).filter(road => {
+  }).filter(road => road.distanceFromRoute <= maxDistanceKm).filter(road => {
     if (road.coords.length < 2) return false;
     const key = road.id || `${road.name}:${road.highway}:${road.coords[0].lat}:${road.coords[0].lng}`;
     if (seen.has(key)) return false;
@@ -764,8 +1048,14 @@ function getManeuverFocusInstruction() {
   }) || null;
 }
 
+function shouldUseManeuverZoom() {
+  return state.simulation || state.gpsWatch !== null || state.progressKm > 0.03 || state.speedKmh > 2;
+}
+
 function getRouteViewBox(routePoint, boundsForRoute) {
-  if (!routePoint || !getManeuverFocusInstruction()) return { x: 0, y: 0, width: 100, height: 100, zoomed: false };
+  if (!routePoint || !shouldUseManeuverZoom() || !getManeuverFocusInstruction()) {
+    return { x: 0, y: 0, width: 100, height: 100, zoomed: false };
+  }
   const car = project(routePoint, boundsForRoute);
   const size = maneuverViewBoxSize(routePoint, boundsForRoute);
   return {
@@ -838,6 +1128,27 @@ function renderSpeedLimit() {
   }
 }
 
+function nextRouteNotice() {
+  const cameras = state.route?.cameras || [];
+  const camera = cameras.find(item => typeof item.doneKm === "number" && item.doneKm >= state.progressKm - 0.02);
+  if (camera) {
+    const distKm = Math.max(0, camera.doneKm - state.progressKm);
+    if (distKm <= notifyKm(state.settings.cameraNotifyDistanceM)) {
+      const limit = camera.limit ? ` ${camera.limit} km/h` : "";
+      return `Radar${limit} za ${fmtKm(distKm)}`;
+    }
+  }
+  const pois = state.route?.pois || [];
+  const poi = pois.find(item => typeof item.doneKm === "number" && item.doneKm >= state.progressKm + 0.02);
+  if (!poi) return "";
+  const distKm = Math.max(0, poi.doneKm - state.progressKm);
+  return distKm <= notifyKm(state.settings.poiNotifyDistanceM) ? `${poi.name || "POI"} za ${fmtKm(distKm)}` : "";
+}
+
+function routeNoticeText() {
+  return shouldFetchRouteExtras() ? nextRouteNotice() : "";
+}
+
 function scheduleRender(force = false) {
   if (force) {
     if (state.renderTimer) clearTimeout(state.renderTimer);
@@ -846,7 +1157,8 @@ function scheduleRender(force = false) {
     return;
   }
   const now = Date.now();
-  const wait = Math.max(0, MIN_RENDER_INTERVAL_MS - (now - state.lastRenderAt));
+  const interval = isLiteMode() ? LITE_RENDER_INTERVAL_MS : MIN_RENDER_INTERVAL_MS;
+  const wait = Math.max(0, interval - (now - state.lastRenderAt));
   if (state.renderTimer) return;
   state.renderTimer = setTimeout(() => {
     state.renderTimer = null;
@@ -855,14 +1167,29 @@ function scheduleRender(force = false) {
 }
 
 function startMotionAnimation() {
-  if (state.motionFrame !== null) return;
-  state.motionFrame = requestAnimationFrame(animateMotion);
+  if (isNotificationOnlyMode()) return;
+  if (state.motionFrame !== null || state.motionTimer !== null) return;
+  scheduleMotionFrame();
 }
 
 function stopMotionAnimation() {
   if (state.motionFrame !== null) cancelAnimationFrame(state.motionFrame);
+  if (state.motionTimer !== null) clearTimeout(state.motionTimer);
   state.motionFrame = null;
+  state.motionTimer = null;
   state.lastMotionFrameAt = 0;
+}
+
+function scheduleMotionFrame() {
+  const delay = isLiteMode() ? LITE_MOTION_INTERVAL_MS : 0;
+  if (delay) {
+    state.motionTimer = setTimeout(() => {
+      state.motionTimer = null;
+      state.motionFrame = requestAnimationFrame(animateMotion);
+    }, delay);
+  } else {
+    state.motionFrame = requestAnimationFrame(animateMotion);
+  }
 }
 
 function animateMotion(now) {
@@ -886,13 +1213,17 @@ function animateMotion(now) {
 
   const visualDelta = Math.abs(targetVisual - state.visualProgressKm);
   const cameraDelta = Math.abs(targetCamera - state.cameraProgressKm);
-  render(true);
+  const motionInterval = isLiteMode() ? LITE_MOTION_INTERVAL_MS : 0;
+  if (!motionInterval || now - state.lastMotionRenderAt >= motionInterval) {
+    state.lastMotionRenderAt = now;
+    render(true);
+  }
 
   const shouldKeepMoving =
     visualDelta > MOTION_EPSILON_KM ||
     cameraDelta > MOTION_EPSILON_KM ||
     ((state.simulation || state.gpsWatch !== null) && state.speedKmh > 1 && state.visualProgressKm < state.totalKm);
-  if (shouldKeepMoving) state.motionFrame = requestAnimationFrame(animateMotion);
+  if (shouldKeepMoving) scheduleMotionFrame();
   else state.lastMotionFrameAt = 0;
 }
 
@@ -941,9 +1272,13 @@ function pathData(coords, b, smooth = false) {
 function render(force = false) {
   const route = state.route;
   const routeId = route?.createdAt || "none";
+  const liteMode = isLiteMode();
+  const notificationOnlyMode = isNotificationOnlyMode();
+  const modeKey = state.settings.powerMode;
+  const summaryKey = `${state.settings.maxDrivingSpeedKmh}:${state.settings.nearbyRoadRadiusM}`;
   const renderKey = route?.coords?.length
-    ? `${routeId}:${Math.round(state.progressKm * 125)}:${Math.round(state.speedKmh / 3)}:${state.nextInstructionIndex}:${state.currentLimit || 0}`
-    : `empty:${Math.round(state.speedKmh / 5)}`;
+    ? `${routeId}:${modeKey}:${summaryKey}:${Math.round(state.progressKm * 125)}:${Math.round(state.speedKmh / 3)}:${state.nextInstructionIndex}:${state.currentLimit || 0}`
+    : `empty:${modeKey}:${summaryKey}:${Math.round(state.speedKmh / 5)}`;
   if (!force && renderKey === state.lastRenderKey) return;
   state.lastRenderKey = renderKey;
   state.lastRenderAt = Date.now();
@@ -973,10 +1308,28 @@ function render(force = false) {
     return;
   }
 
+  if (notificationOnlyMode) {
+    el.svg.innerHTML = "";
+    applySvgViewBox({ x: 0, y: 0, width: 100, height: 100 });
+    applyRouteCamera();
+    el.vehicle.style.display = "none";
+    state.vehicleBearing = null;
+    const percent = state.totalKm ? Math.round((state.progressKm / state.totalKm) * 100) : 0;
+    el.sumDistance.textContent = fmtKm(state.totalKm);
+    el.sumTime.innerHTML = routeTimeHtml(route);
+    el.sumPoints.textContent = String(route.instructions?.length || 0);
+    el.distance.textContent = `${fmtKm(Math.max(0, state.totalKm - state.progressKm))} do celu`;
+    el.progress.textContent = `${percent}%`;
+    el.speed.textContent = `${Math.round(state.speedKmh)} km/h`;
+    renderSpeedLimit();
+    renderManeuver();
+    return;
+  }
+
   const coords = route.coords;
   const visibleCoords = [
     ...coords,
-    ...(route.nearbyRoads || []).flatMap(road => road.coords || [])
+    ...(!liteMode ? (route.nearbyRoads || []).flatMap(road => road.coords || []) : [])
   ];
   const b = bounds(visibleCoords.length ? visibleCoords : coords);
   const visualKm = Math.max(0, Math.min(state.visualProgressKm || state.progressKm, state.totalKm));
@@ -985,14 +1338,16 @@ function render(force = false) {
   const point = routePointAt(visualKm);
   const cameraPoint = routePointAt(cameraKm) || point;
   const viewBox = getRouteViewBox(cameraPoint, b);
-  const smoothRoute = viewBox.zoomed;
+  const smoothRoute = viewBox.zoomed && !liteMode;
   const all = pathData(coords, b, smoothRoute);
   applySvgViewBox(viewBox);
   applyRouteCamera();
 
-  for (const road of route.nearbyRoads || []) {
-    if (!road.coords?.length) continue;
-    el.svg.insertAdjacentHTML("beforeend", `<polyline class="nearby-road" points="${polyline(road.coords, b)}"><title>${road.name || "Droga OSM"}</title></polyline>`);
+  if (!liteMode) {
+    for (const road of route.nearbyRoads || []) {
+      if (!road.coords?.length) continue;
+      el.svg.insertAdjacentHTML("beforeend", `<polyline class="nearby-road" points="${polyline(road.coords, b)}"><title>${road.name || "Droga OSM"}</title></polyline>`);
+    }
   }
   el.svg.insertAdjacentHTML("beforeend", `<path class="route-bg" d="${all}"></path>`);
   el.svg.insertAdjacentHTML("beforeend", `<path class="route-line" d="${all}"></path>`);
@@ -1011,21 +1366,23 @@ function render(force = false) {
     const cls = instruction === nextInstruction ? "maneuver-dot next" : "maneuver-dot";
     el.svg.insertAdjacentHTML("beforeend", `<circle class="${cls}" cx="${q.x}" cy="${q.y}" r="${scaledRadius(0.58, viewBox)}"></circle>`);
   }
-  for (const poi of route.pois || []) {
-    if (!isAhead(poi.doneKm, 0.03)) continue;
-    const src = poi.snapped || poi;
-    const q = project(src, b);
-    const r = scaledRadius(1.05, viewBox);
-    el.svg.insertAdjacentHTML("beforeend", `<g class="poi-icon"><circle cx="${q.x}" cy="${q.y}" r="${r}"></circle><text x="${q.x}" y="${q.y}">${poi.icon || "P"}</text><title>${poi.name}</title></g>`);
-  }
-  for (const camera of route.cameras || []) {
-    if (!isAhead(camera.doneKm, 0.03)) continue;
-    const src = camera.snapped || camera;
-    const q = project(src, b);
-    const title = camera.limit ? `${camera.name} ${camera.limit} km/h` : camera.name;
-    const r = scaledRadius(1.08, viewBox);
-    const label = camera.limit ? String(camera.limit).slice(0, 3) : "R";
-    el.svg.insertAdjacentHTML("beforeend", `<g class="camera-icon"><circle cx="${q.x}" cy="${q.y}" r="${r}"></circle><text x="${q.x}" y="${q.y}">${label}</text><title>${title}</title></g>`);
+  if (!liteMode) {
+    for (const poi of route.pois || []) {
+      if (!isAhead(poi.doneKm, 0.03)) continue;
+      const src = poi.snapped || poi;
+      const q = project(src, b);
+      const r = scaledRadius(1.05, viewBox);
+      el.svg.insertAdjacentHTML("beforeend", `<g class="poi-icon"><circle cx="${q.x}" cy="${q.y}" r="${r}"></circle><text x="${q.x}" y="${q.y}">${poi.icon || "P"}</text><title>${poi.name}</title></g>`);
+    }
+    for (const camera of route.cameras || []) {
+      if (!isAhead(camera.doneKm, 0.03)) continue;
+      const src = camera.snapped || camera;
+      const q = project(src, b);
+      const title = camera.limit ? `${camera.name} ${camera.limit} km/h` : camera.name;
+      const r = scaledRadius(1.08, viewBox);
+      const label = camera.limit ? String(camera.limit).slice(0, 3) : "R";
+      el.svg.insertAdjacentHTML("beforeend", `<g class="camera-icon"><circle cx="${q.x}" cy="${q.y}" r="${r}"></circle><text x="${q.x}" y="${q.y}">${label}</text><title>${title}</title></g>`);
+    }
   }
 
   if (point) {
@@ -1040,7 +1397,7 @@ function render(force = false) {
 
   const percent = state.totalKm ? Math.round((state.progressKm / state.totalKm) * 100) : 0;
   el.sumDistance.textContent = fmtKm(state.totalKm);
-  el.sumTime.textContent = fmtTime(route.durationSec);
+  el.sumTime.innerHTML = routeTimeHtml(route);
   el.sumPoints.textContent = String(route.instructions?.length || 0);
   el.distance.textContent = `${fmtKm(Math.max(0, state.totalKm - state.progressKm))} do celu`;
   el.progress.textContent = `${percent}%`;
@@ -1071,46 +1428,106 @@ function renderManeuver() {
     `<span class="lane ${lane.active ? "active" : ""}">${lane.arrows}</span>`
   )).join("");
   el.laneGuide.classList.toggle("visible", lanes.length > 0);
-  el.nextManeuverText.textContent = next ? `Potem: ${next.text}` : "";
+  const notice = routeNoticeText();
+  el.nextManeuverText.textContent = [next ? `Potem: ${next.text}` : "", notice].filter(Boolean).join(" · ");
   if (distKm < 0.08 && state.lastSpokenInstruction !== state.nextInstructionIndex) {
     state.lastSpokenInstruction = state.nextInstructionIndex;
     speak(current.type === "arrive" ? `Za ${fmtKm(distKm)} dotrzesz do celu` : `Za ${fmtKm(distKm)}, ${current.text}`);
   }
 }
 
-async function createRoute() {
-  try {
-    stopSimulation();
-    showStatus("Pobieranie startu GPS...");
-    const destQuery = el.dest.value.trim();
-    if (!destQuery) throw new Error("Wpisz cel");
-    const start = await locateStart();
-    showStatus("Szukam celu...");
-    const dest = await geocode(destQuery);
-    showStatus("Wyznaczanie trasy...");
-    const url = `${OSRM_URL}/${start.lng},${start.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson&steps=true`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Błąd serwera trasy");
-    const data = await response.json();
-    if (data.code !== "Ok" || !data.routes?.length) throw new Error("Nie udało się wyznaczyć trasy");
-    const route = data.routes[0];
-    const coords = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
-    state.start = start;
-    state.dest = dest;
-    state.cumulative = buildCumulative(coords);
-    state.totalKm = state.cumulative[state.cumulative.length - 1] || route.distance / 1000;
-    const instructions = buildInstructions(route, coords);
-    state.route = { coords, instructions, pois: [], cameras: [], speedLimits: [], nearbyRoads: [], durationSec: route.duration, createdAt: Date.now(), destName: destQuery };
-    state.progressKm = 0;
-    state.speedKmh = 0;
-    state.currentLimit = null;
-    state.lastSpeedAlertAt = 0;
-    state.nextInstructionIndex = 0;
-    state.lastSpokenInstruction = -1;
-    resetMotionProgress(0);
+function buildRouteChoice(route, index, destName) {
+  const coords = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+  const cumulative = buildCumulative(coords);
+  const totalKm = cumulative[cumulative.length - 1] || route.distance / 1000;
+  return {
+    index,
+    label: index === 0 ? "Najlepsza" : `Alternatywa ${index}`,
+    route: {
+      coords,
+      instructions: buildInstructions(route, coords, totalKm),
+      pois: [],
+      cameras: [],
+      speedLimits: [],
+      nearbyRoads: [],
+      durationSec: route.duration,
+      createdAt: Date.now(),
+      destName
+    },
+    totalKm,
+    durationSec: route.duration,
+    distanceKm: route.distance / 1000
+  };
+}
+
+function renderRouteChoices() {
+  if (!el.routeChoices) return;
+  if (!state.routeChoices.length) {
+    el.routeChoices.innerHTML = "";
+    el.routeChoices.classList.remove("visible");
+    return;
+  }
+  el.routeChoices.classList.add("visible");
+  el.routeChoices.innerHTML = state.routeChoices.map(choice => {
+    const active = choice.index === state.activeRouteChoiceIndex;
+    return `
+      <div class="route-choice ${active ? "active" : ""}">
+        <button type="button" data-route-preview="${choice.index}">
+          <strong>${choice.label}</strong>
+          <small>${fmtTime(choice.durationSec)} · max ${fmtTime(maxSpeedDurationSec(choice.distanceKm))} · ${fmtKm(choice.distanceKm)}</small>
+        </button>
+        <button type="button" data-route-choice="${choice.index}">${active ? "Wybierz podgląd" : "Wybierz"}</button>
+      </div>
+    `;
+  }).join("");
+}
+
+function hasPendingRouteChoice() {
+  return state.routeChoices.length > 0;
+}
+
+function previewRouteChoice(index = 0) {
+  const choice = state.routeChoices[index];
+  if (!choice) return;
+  state.activeRouteChoiceIndex = index;
+  state.route = { ...choice.route, createdAt: Date.now() };
+  state.cumulative = buildCumulative(state.route.coords);
+  state.totalKm = choice.totalKm;
+  state.progressKm = 0;
+  state.speedKmh = 0;
+  state.currentLimit = null;
+  state.lastSpeedAlertAt = 0;
+  state.nextInstructionIndex = 0;
+  state.lastSpokenInstruction = -1;
+  resetMotionProgress(0);
+  renderRouteChoices();
+  scheduleRender(true);
+}
+
+async function selectRouteChoice(index) {
+  const choice = state.routeChoices[index];
+  if (!choice) return;
+  stopSimulation();
+  state.activeRouteChoiceIndex = index;
+  state.start = state.routeChoiceStart;
+  state.dest = state.routeChoiceDest;
+  state.route = { ...choice.route, createdAt: Date.now() };
+  state.cumulative = buildCumulative(state.route.coords);
+  state.totalKm = choice.totalKm;
+  state.progressKm = 0;
+  state.speedKmh = 0;
+  state.currentLimit = null;
+  state.lastSpeedAlertAt = 0;
+  state.nextInstructionIndex = 0;
+  state.lastSpokenInstruction = -1;
+  resetMotionProgress(0);
+  renderRouteChoices();
+  if (!shouldFetchRouteExtras()) {
+    showStatus(`Tryb ${powerModeLabel()}: pominięto dodatkowe warstwy`);
+  } else {
     showStatus("Pobieranie POI i fotoradarów...");
     try {
-      const routePoints = await loadRoutePoints(coords);
+      const routePoints = await loadRoutePoints(state.route.coords);
       state.route.pois = routePoints.pois;
       state.route.cameras = routePoints.cameras;
       state.route.speedLimits = routePoints.speedLimits;
@@ -1118,11 +1535,51 @@ async function createRoute() {
     } catch (error) {
       console.warn("Nie udało się pobrać punktów OSM", error);
     }
-    showStatus(`Trasa gotowa: ${state.route.pois.length} POI, ${state.route.cameras.length} radarów, ${state.route.speedLimits.length} limitów, ${state.route.nearbyRoads.length} dróg`);
-    saveRoute();
-    scheduleRender(true);
-    setPanelOpen(false);
-    speak("Trasa wyznaczona");
+  }
+  showStatus(!shouldFetchRouteExtras()
+    ? `Trasa wybrana w trybie ${powerModeLabel()}`
+    : `Trasa wybrana: ${state.route.pois.length} POI, ${state.route.cameras.length} radarów, ${state.route.speedLimits.length} limitów, ${state.route.nearbyRoads.length} dróg`);
+  state.routeChoices = [];
+  state.activeRouteChoiceIndex = -1;
+  state.activeSavedRouteId = null;
+  renderRouteChoices();
+  state.activeSavedRouteId = null;
+  persistLastRoute();
+  updateSavedInfo();
+  scheduleRender(true);
+  setPanelOpen(false);
+  speak("Trasa wybrana");
+}
+
+async function createRoute() {
+  try {
+    stopSimulation();
+    state.routeChoices = [];
+    state.activeRouteChoiceIndex = -1;
+    renderRouteChoices();
+    showStatus("Pobieranie startu GPS...");
+    const destQuery = el.dest.value.trim();
+    if (!destQuery) throw new Error("Wpisz cel");
+    const start = await locateStart();
+    showStatus("Szukam celu...");
+    const dest = await geocode(destQuery);
+    showStatus("Wyznaczanie trasy...");
+    const url = `${OSRM_URL}/${start.lng},${start.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson&steps=true&alternatives=true`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Błąd serwera trasy");
+    const data = await response.json();
+    if (data.code !== "Ok" || !data.routes?.length) throw new Error("Nie udało się wyznaczyć trasy");
+    state.start = start;
+    state.dest = dest;
+    state.routeChoiceStart = start;
+    state.routeChoiceDest = dest;
+    state.routeChoices = data.routes.slice(0, 3).map((route, index) => buildRouteChoice(route, index, destQuery));
+    previewRouteChoice(0);
+    showStatus(state.routeChoices.length > 1
+      ? `Znaleziono ${state.routeChoices.length} trasy. Wybierz wariant.`
+      : "Znaleziono trasę. Potwierdź wybór.");
+    setPanelOpen(true);
+    speak("Wybierz trasę");
   } catch (error) {
     showStatus(error.message || "Błąd");
     alert(error.message || "Nie udało się wyznaczyć trasy");
@@ -1130,24 +1587,80 @@ async function createRoute() {
   }
 }
 
-function saveRoute() {
-  if (!state.route) return alert("Brak trasy do zapisania");
-  localStorage.setItem(STORE_KEY, JSON.stringify({
+function activeRouteSnapshot() {
+  return {
     start: state.start,
     dest: state.dest,
     route: state.route,
     progressKm: state.progressKm
-  }));
-  updateSavedInfo();
+  };
 }
 
-function loadRoute() {
-  const raw = localStorage.getItem(STORE_KEY);
-  if (!raw) return alert("Brak zapisanej trasy");
-  const saved = JSON.parse(raw);
+function persistLastRoute() {
+  if (!state.route) return;
+  localStorage.setItem(STORE_KEY, JSON.stringify(activeRouteSnapshot()));
+}
+
+function routeDefaultName(snapshot = activeRouteSnapshot()) {
+  const destName = snapshot.route?.destName || snapshot.dest?.name || "Trasa";
+  const date = new Date().toLocaleDateString("pl-PL");
+  return `${destName}`.split(",")[0].trim() || `Trasa ${date}`;
+}
+
+function savedRouteDistanceKm(route) {
+  const coords = route?.coords || [];
+  if (coords.length < 2) return 0;
+  const cumulative = buildCumulative(coords);
+  return cumulative[cumulative.length - 1] || 0;
+}
+
+function normalizeSavedRoute(entry, index = 0) {
+  if (!entry?.route?.coords?.length) return null;
+  return {
+    id: entry.id || `route-${Date.now()}-${index}`,
+    name: entry.name || routeDefaultName(entry),
+    favorite: entry.favorite === true,
+    savedAt: entry.savedAt || entry.route?.createdAt || Date.now(),
+    start: entry.start || null,
+    dest: entry.dest || null,
+    route: entry.route,
+    progressKm: Math.max(0, Number(entry.progressKm) || 0)
+  };
+}
+
+function readSavedRoutes() {
+  let routes = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ROUTES_STORE_KEY) || "[]");
+    if (Array.isArray(parsed)) routes = parsed.map(normalizeSavedRoute).filter(Boolean);
+  } catch (_) {
+    routes = [];
+  }
+  if (!routes.length) {
+    try {
+      const legacy = normalizeSavedRoute(JSON.parse(localStorage.getItem(STORE_KEY) || "null"));
+      if (legacy) {
+        legacy.id = "legacy-last-route";
+        legacy.name = legacy.name || "Ostatnia trasa";
+        routes = [legacy];
+        writeSavedRoutes(routes);
+      }
+    } catch (_) {
+      routes = [];
+    }
+  }
+  return routes.sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.savedAt - a.savedAt);
+}
+
+function writeSavedRoutes(routes) {
+  localStorage.setItem(ROUTES_STORE_KEY, JSON.stringify(routes));
+}
+
+function applySavedRoute(saved) {
   state.start = saved.start;
   state.dest = saved.dest;
   state.route = saved.route;
+  state.activeSavedRouteId = saved.id || null;
   state.cumulative = buildCumulative(state.route.coords);
   state.totalKm = state.cumulative[state.cumulative.length - 1] || 0;
   if (!Array.isArray(state.route.instructions)) {
@@ -1162,35 +1675,104 @@ function loadRoute() {
   state.speedKmh = 0;
   state.nextInstructionIndex = 0;
   state.lastSpokenInstruction = -1;
+  state.routeChoices = [];
+  state.activeRouteChoiceIndex = -1;
+  renderRouteChoices();
   resetMotionProgress(state.progressKm);
-  showStatus("Wczytano trasę");
+  persistLastRoute();
+  updateSavedInfo();
+  showStatus(`Wczytano: ${saved.name}`);
   scheduleRender(true);
   setPanelOpen(false);
 }
 
+function saveRoute() {
+  if (!state.route) return alert("Brak trasy do zapisania");
+  if (hasPendingRouteChoice()) return alert("Najpierw wybierz wariant trasy");
+  const snapshot = activeRouteSnapshot();
+  const defaultName = routeDefaultName(snapshot);
+  const name = (prompt("Nazwa trasy", defaultName) || "").trim();
+  if (!name) return;
+  const routes = readSavedRoutes();
+  const entry = normalizeSavedRoute({
+    ...snapshot,
+    id: `route-${Date.now()}`,
+    name,
+    favorite: false,
+    savedAt: Date.now()
+  });
+  routes.unshift(entry);
+  writeSavedRoutes(routes);
+  state.activeSavedRouteId = entry.id;
+  persistLastRoute();
+  updateSavedInfo();
+  showStatus(`Zapisano: ${entry.name}`);
+}
+
+function loadRoute(id = null) {
+  const routes = readSavedRoutes();
+  if (!routes.length) return alert("Brak zapisanych tras");
+  const saved = id ? routes.find(route => route.id === id) : routes.find(route => route.favorite) || routes[0];
+  if (!saved) return alert("Nie znaleziono zapisanej trasy");
+  applySavedRoute(saved);
+}
+
+function deleteSavedRoute(id) {
+  const routes = readSavedRoutes();
+  const route = routes.find(item => item.id === id);
+  if (!route) return;
+  if (!confirm(`Usunąć trasę "${route.name}"?`)) return;
+  writeSavedRoutes(routes.filter(item => item.id !== id));
+  if (state.activeSavedRouteId === id) {
+    state.activeSavedRouteId = null;
+    localStorage.removeItem(STORE_KEY);
+  }
+  updateSavedInfo();
+  showStatus("Usunięto trasę");
+}
+
+function toggleFavoriteRoute(id) {
+  const routes = readSavedRoutes().map(route => (
+    route.id === id ? { ...route, favorite: !route.favorite } : route
+  ));
+  writeSavedRoutes(routes);
+  updateSavedInfo();
+}
+
 function updateSavedInfo() {
-  const raw = localStorage.getItem(STORE_KEY);
-  if (!raw) {
-    el.savedInfo.textContent = "Zapis: brak";
+  const routes = readSavedRoutes();
+  if (!routes.length) {
+    el.savedInfo.innerHTML = `<strong>Zapisane trasy</strong><span>Brak zapisanych tras</span>`;
     return;
   }
-  try {
-    const saved = JSON.parse(raw);
-    const count = saved.route?.coords?.length || 0;
-    const instructions = saved.route?.instructions?.length || 0;
-    const pois = saved.route?.pois?.length || 0;
-    const cameras = saved.route?.cameras?.length || 0;
-    const speedLimits = saved.route?.speedLimits?.length || 0;
-    const nearbyRoads = saved.route?.nearbyRoads?.length || 0;
-    const date = new Date(saved.route?.createdAt || Date.now()).toLocaleString("pl-PL");
-    el.savedInfo.textContent = `Zapis: ${count} punktów, ${instructions} manewrów, ${pois} POI, ${cameras} radarów, ${speedLimits} limitów, ${nearbyRoads} dróg, ${date}`;
-  } catch (_) {
-    el.savedInfo.textContent = "Zapis: uszkodzony";
-  }
+  el.savedInfo.innerHTML = `
+    <strong>Zapisane trasy</strong>
+    <div class="saved-routes">
+      ${routes.map(route => {
+        const date = new Date(route.savedAt || Date.now()).toLocaleDateString("pl-PL");
+        const active = route.id === state.activeSavedRouteId;
+        const title = `${route.favorite ? "★ " : ""}${route.name}`;
+        return `
+          <article class="saved-route ${active ? "active" : ""}">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <small>${fmtTime(route.route?.durationSec)} · ${fmtKm(savedRouteDistanceKm(route.route))} · ${date}</small>
+            </div>
+            <nav>
+              <button type="button" data-saved-load="${escapeHtml(route.id)}">Wczytaj</button>
+              <button type="button" data-saved-favorite="${escapeHtml(route.id)}">${route.favorite ? "★" : "☆"}</button>
+              <button type="button" data-saved-delete="${escapeHtml(route.id)}">Usuń</button>
+            </nav>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 function startSimulation() {
   if (!state.route) return alert("Najpierw wyznacz albo wczytaj trasę");
+  if (hasPendingRouteChoice()) return alert("Najpierw wybierz wariant trasy");
   if (state.simulation) return stopSimulation();
   state.progressKm = 0;
   resetMotionProgress(0);
@@ -1243,6 +1825,7 @@ function stopAll() {
 
 function startGps() {
   if (!state.route) return alert("Najpierw wyznacz albo wczytaj trasę");
+  if (hasPendingRouteChoice()) return alert("Najpierw wybierz wariant trasy");
   if (!navigator.geolocation) return alert("Brak GPS w przeglądarce");
   if (state.gpsWatch !== null) {
     navigator.geolocation.clearWatch(state.gpsWatch);
@@ -1267,7 +1850,9 @@ function startGps() {
     startMotionAnimation();
     const movedEnough = Math.abs(state.progressKm - previousProgress) >= GPS_RENDER_STEP_KM;
     const speedChangedEnough = Math.abs(state.speedKmh - state.lastRenderedSpeedKmh) >= GPS_SPEED_RENDER_STEP_KMH;
-    if (movedEnough || speedChangedEnough) {
+    if (isUltraLiteMode()) {
+      scheduleRender(true);
+    } else if (movedEnough || speedChangedEnough) {
       scheduleRender();
     }
   }, error => {
@@ -1282,6 +1867,11 @@ function clearRoute() {
   state.start = null;
   state.dest = null;
   state.route = null;
+  state.activeSavedRouteId = null;
+  state.routeChoices = [];
+  state.routeChoiceStart = null;
+  state.routeChoiceDest = null;
+  state.activeRouteChoiceIndex = -1;
   state.cumulative = [];
   state.totalKm = 0;
   state.progressKm = 0;
@@ -1295,6 +1885,7 @@ function clearRoute() {
   localStorage.removeItem(STORE_KEY);
   showStatus("Brak trasy");
   updateSavedInfo();
+  renderRouteChoices();
   scheduleRender(true);
   setPanelOpen(true);
 }
@@ -1302,14 +1893,45 @@ function clearRoute() {
 el.routeBtn.addEventListener("click", createRoute);
 el.locateBtn.addEventListener("click", () => locateStart().catch(error => alert(error.message)));
 el.saveBtn.addEventListener("click", saveRoute);
-el.loadBtn.addEventListener("click", loadRoute);
+el.loadBtn.addEventListener("click", () => loadRoute());
 el.simBtn.addEventListener("click", startSimulation);
 el.stopBtn.addEventListener("click", stopAll);
 el.gpsBtn.addEventListener("click", startGps);
 el.menuBtn.addEventListener("click", () => el.drawer.classList.add("open"));
 el.closeMenuBtn.addEventListener("click", () => el.drawer.classList.remove("open"));
 el.voiceBtn.addEventListener("click", () => speak("Lektor działa"));
+el.powerModeInput.addEventListener("change", event => setPowerMode(event.target.value));
+el.routeChoices.addEventListener("click", event => {
+  const preview = event.target.closest("[data-route-preview]");
+  if (preview) {
+    previewRouteChoice(Number(preview.dataset.routePreview));
+    return;
+  }
+  const choice = event.target.closest("[data-route-choice]");
+  if (choice) selectRouteChoice(Number(choice.dataset.routeChoice));
+});
+el.savedInfo.addEventListener("click", event => {
+  const load = event.target.closest("[data-saved-load]");
+  if (load) {
+    loadRoute(load.dataset.savedLoad);
+    return;
+  }
+  const favorite = event.target.closest("[data-saved-favorite]");
+  if (favorite) {
+    toggleFavoriteRoute(favorite.dataset.savedFavorite);
+    return;
+  }
+  const remove = event.target.closest("[data-saved-delete]");
+  if (remove) deleteSavedRoute(remove.dataset.savedDelete);
+});
 el.maneuverZoomInput.addEventListener("input", event => setManeuverZoomRadius(event.target.value));
+if (el.poiNotifyInput) el.poiNotifyInput.addEventListener("input", event => setPoiNotifyDistance(event.target.value));
+if (el.cameraNotifyInput) el.cameraNotifyInput.addEventListener("input", event => setCameraNotifyDistance(event.target.value));
+if (el.maxSpeedInput) el.maxSpeedInput.addEventListener("input", event => setMaxDrivingSpeed(event.target.value));
+if (el.roadRadiusInput) el.roadRadiusInput.addEventListener("input", event => setNearbyRoadRadius(event.target.value));
+for (const input of el.poiTypeInputs || []) {
+  input.addEventListener("change", event => setPoiType(event.target.dataset.poiType, event.target.checked));
+}
 el.clearBtn.addEventListener("click", clearRoute);
 el.panelHandle.addEventListener("click", togglePanel);
 el.panelToggleBtn.addEventListener("click", togglePanel);
@@ -1338,5 +1960,6 @@ window.addEventListener("resize", () => {
 
 loadSettings();
 updateSavedInfo();
+startDeviceMonitor();
 setPanelOpen(true);
 scheduleRender(true);
