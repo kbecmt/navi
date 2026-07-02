@@ -38,6 +38,11 @@
           <small id="nextManeuverText">--</small>
         </div>
       </div>
+      <nav id="quickActions" aria-label="Szybkie akcje">
+        <button id="repeatBtn" type="button">Powtórz</button>
+        <button id="nextBtn" type="button">Następny</button>
+        <button id="quickStopBtn" type="button">Stop GPS</button>
+      </nav>
     </section>
 
     <section id="panel">
@@ -107,11 +112,34 @@
         </select>
         <strong id="powerModeValue">Pełny</strong>
       </label>
+      <label class="drawer-setting">
+        Profil ustawień
+        <select id="profileInput">
+          <option value="custom">Własny</option>
+          <option value="city">Miasto</option>
+          <option value="route">Trasa</option>
+          <option value="night">Noc</option>
+          <option value="saving">Oszczędny</option>
+        </select>
+        <strong id="profileValue">Własny</strong>
+      </label>
+      <label class="drawer-setting">
+        Tryb nocny
+        <select id="nightModeInput">
+          <option value="auto">Auto</option>
+          <option value="on">Włączony</option>
+          <option value="off">Wyłączony</option>
+        </select>
+        <strong id="nightModeValue">Auto</strong>
+      </label>
       <div id="devicePanel" class="drawer-setting device-panel">
         <strong>Stan urządzenia</strong>
         <div><span>Temperatura</span><b id="deviceTempText">Brak dostępu</b></div>
         <div><span>Bateria</span><b id="batteryText">--</b></div>
         <div><span>Obciążenie</span><b id="loadText">--</b></div>
+        <div><span>Sieć</span><b id="networkText">--</b></div>
+        <div><span>GPS</span><b id="gpsQualityText">--</b></div>
+        <div><span>Dokładność</span><b id="gpsAccuracyText">--</b></div>
         <small id="deviceHint">Strona WWW nie ma dostępu do czujnika temperatury telefonu.</small>
       </div>
       <label class="drawer-setting">
@@ -152,6 +180,12 @@
         <label><input type="checkbox" data-poi-type="help" checked> Pomoc</label>
       </div>
       <button id="clearBtn" type="button">Wyczyść trasę</button>
+      <div class="drawer-setting data-tools">
+        <strong>Dane aplikacji</strong>
+        <button id="exportDataBtn" type="button">Eksportuj</button>
+        <button id="importDataBtn" type="button">Importuj</button>
+        <input id="importDataInput" type="file" accept="application/json,.json" hidden>
+      </div>
       <div id="savedInfo">Zapis: brak</div>
     </aside>
   </main>

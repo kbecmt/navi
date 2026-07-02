@@ -26,10 +26,13 @@ const MOTION_EPSILON_KM = 0.0007;
 const LITE_RENDER_INTERVAL_MS = 1500;
 const LITE_MOTION_INTERVAL_MS = 180;
 const DEVICE_MONITOR_INTERVAL_MS = 2500;
+const ROUTE_PROGRESS_SAVE_INTERVAL_MS = 15000;
 const SPEECH_QUEUE_LIMIT = 6;
 const SPEECH_WATCHDOG_MS = 4500;
 const DEFAULT_SOUND_MODE = "both";
 const DEFAULT_SIGNAL_VOLUME = 70;
+const DEFAULT_PROFILE = "custom";
+const DEFAULT_NIGHT_MODE = "auto";
 const DEFAULT_MANEUVER_NOTIFY_DISTANCE_M = 120;
 const DEFAULT_MANEUVER_REMINDER_DELAY_SEC = 12;
 const DEFAULT_POI_NOTIFY_DISTANCE_M = 800;
@@ -64,6 +67,7 @@ const state = {
   simulation: null,
   gpsWatch: null,
   lastGps: null,
+  gpsAccuracyM: null,
   speedKmh: 0,
   currentLimit: null,
   lastSpeedAlertAt: 0,
@@ -77,6 +81,7 @@ const state = {
   lastRenderAt: 0,
   lastRenderedSpeedKmh: 0,
   lastMotionRenderAt: 0,
+  lastRouteProgressSaveAt: 0,
   cameraBearing: null,
   vehicleBearing: null,
   battery: null,
@@ -105,6 +110,8 @@ const state = {
     powerMode: "full",
     soundMode: DEFAULT_SOUND_MODE,
     signalVolume: DEFAULT_SIGNAL_VOLUME,
+    profile: DEFAULT_PROFILE,
+    nightMode: DEFAULT_NIGHT_MODE,
     maneuverNotifyDistanceM: DEFAULT_MANEUVER_NOTIFY_DISTANCE_M,
     maneuverReminderDelaySec: DEFAULT_MANEUVER_REMINDER_DELAY_SEC,
     poiNotifyDistanceM: DEFAULT_POI_NOTIFY_DISTANCE_M,
@@ -150,6 +157,10 @@ const el = {
   voiceBtn: document.getElementById("voiceBtn"),
   powerModeInput: document.getElementById("powerModeInput"),
   powerModeValue: document.getElementById("powerModeValue"),
+  profileInput: document.getElementById("profileInput"),
+  profileValue: document.getElementById("profileValue"),
+  nightModeInput: document.getElementById("nightModeInput"),
+  nightModeValue: document.getElementById("nightModeValue"),
   soundModeInput: document.getElementById("soundModeInput"),
   soundModeValue: document.getElementById("soundModeValue"),
   signalVolumeInput: document.getElementById("signalVolumeInput"),
@@ -168,10 +179,19 @@ const el = {
   deviceTempText: document.getElementById("deviceTempText"),
   batteryText: document.getElementById("batteryText"),
   loadText: document.getElementById("loadText"),
+  networkText: document.getElementById("networkText"),
+  gpsQualityText: document.getElementById("gpsQualityText"),
+  gpsAccuracyText: document.getElementById("gpsAccuracyText"),
   deviceHint: document.getElementById("deviceHint"),
   maneuverZoomInput: document.getElementById("maneuverZoomInput"),
   maneuverZoomValue: document.getElementById("maneuverZoomValue"),
   clearBtn: document.getElementById("clearBtn"),
+  exportDataBtn: document.getElementById("exportDataBtn"),
+  importDataBtn: document.getElementById("importDataBtn"),
+  importDataInput: document.getElementById("importDataInput"),
+  repeatBtn: document.getElementById("repeatBtn"),
+  nextBtn: document.getElementById("nextBtn"),
+  quickStopBtn: document.getElementById("quickStopBtn"),
   savedInfo: document.getElementById("savedInfo")
 };
 
@@ -319,6 +339,76 @@ function soundModeLabel(mode = state.settings.soundMode) {
   return "Lektor + sygnały";
 }
 
+function profileLabel(profile = state.settings.profile) {
+  if (profile === "city") return "Miasto";
+  if (profile === "route") return "Trasa";
+  if (profile === "night") return "Noc";
+  if (profile === "saving") return "Oszczędny";
+  return "Własny";
+}
+
+function nightModeLabel(mode = state.settings.nightMode) {
+  if (mode === "on") return "Włączony";
+  if (mode === "off") return "Wyłączony";
+  return "Auto";
+}
+
+function isNightNow() {
+  const hour = new Date().getHours();
+  return hour >= 20 || hour < 6;
+}
+
+function isNightModeActive() {
+  if (state.settings.nightMode === "on") return true;
+  if (state.settings.nightMode === "off") return false;
+  return isNightNow();
+}
+
+function profileSettings(profile) {
+  const profiles = {
+    city: {
+      powerMode: "full",
+      maneuverViewRadiusKm: 0.25,
+      maneuverNotifyDistanceM: 80,
+      maneuverReminderDelaySec: 8,
+      poiNotifyDistanceM: 500,
+      cameraNotifyDistanceM: 700,
+      nearbyRoadRadiusM: 350,
+      soundMode: "both"
+    },
+    route: {
+      powerMode: "full",
+      maneuverViewRadiusKm: 1.2,
+      maneuverNotifyDistanceM: 180,
+      maneuverReminderDelaySec: 14,
+      poiNotifyDistanceM: 1200,
+      cameraNotifyDistanceM: 1800,
+      nearbyRoadRadiusM: 700,
+      soundMode: "both"
+    },
+    night: {
+      powerMode: "mega",
+      nightMode: "on",
+      signalVolume: 45,
+      maneuverNotifyDistanceM: 160,
+      maneuverReminderDelaySec: 14,
+      cameraNotifyDistanceM: 1400,
+      soundMode: "signal"
+    },
+    saving: {
+      powerMode: "ultra",
+      signalVolume: 60,
+      maneuverNotifyDistanceM: 130,
+      maneuverReminderDelaySec: 16,
+      poiNotifyDistanceM: 1000,
+      cameraNotifyDistanceM: 1500,
+      nearbyRoadRadiusM: 200,
+      soundMode: "signal"
+    }
+  };
+  return profiles[profile] || null;
+}
+
 function normalizePoiTypes(value) {
   if (!Array.isArray(value)) return [...DEFAULT_POI_TYPES];
   return [...new Set(value.filter(type => POI_TYPE_CONFIG[type]))];
@@ -357,6 +447,8 @@ function loadSettings() {
     if (Number.isFinite(radius)) {
       state.settings.maneuverViewRadiusKm = clamp(radius, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
     }
+    state.settings.profile = ["custom", "city", "route", "night", "saving"].includes(saved.profile) ? saved.profile : DEFAULT_PROFILE;
+    state.settings.nightMode = ["auto", "on", "off"].includes(saved.nightMode) ? saved.nightMode : DEFAULT_NIGHT_MODE;
     state.settings.soundMode = ["voice", "signal", "both"].includes(saved.soundMode) ? saved.soundMode : DEFAULT_SOUND_MODE;
     state.settings.signalVolume = clampNumber(saved.signalVolume, DEFAULT_SIGNAL_VOLUME, 0, 100);
     state.settings.maneuverNotifyDistanceM = clampNumber(saved.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000);
@@ -371,6 +463,8 @@ function loadSettings() {
   } catch (_) {
     state.settings.maneuverViewRadiusKm = DEFAULT_MANEUVER_VIEW_RADIUS_KM;
     state.settings.powerMode = "full";
+    state.settings.profile = DEFAULT_PROFILE;
+    state.settings.nightMode = DEFAULT_NIGHT_MODE;
     state.settings.soundMode = DEFAULT_SOUND_MODE;
     state.settings.signalVolume = DEFAULT_SIGNAL_VOLUME;
     state.settings.maneuverNotifyDistanceM = DEFAULT_MANEUVER_NOTIFY_DISTANCE_M;
@@ -395,6 +489,10 @@ function updateSettingsUi() {
   }
   if (el.powerModeInput) el.powerModeInput.value = state.settings.powerMode;
   if (el.powerModeValue) el.powerModeValue.textContent = powerModeLabel();
+  if (el.profileInput) el.profileInput.value = state.settings.profile;
+  if (el.profileValue) el.profileValue.textContent = profileLabel();
+  if (el.nightModeInput) el.nightModeInput.value = state.settings.nightMode;
+  if (el.nightModeValue) el.nightModeValue.textContent = nightModeLabel();
   if (el.soundModeInput) el.soundModeInput.value = state.settings.soundMode;
   if (el.soundModeValue) el.soundModeValue.textContent = soundModeLabel();
   if (el.signalVolumeInput && el.signalVolumeValue) {
@@ -428,16 +526,40 @@ function updateSettingsUi() {
   document.body.classList.toggle("mega-lite-mode", isMegaLiteMode());
   document.body.classList.toggle("ultra-lite-mode", isUltraLiteMode());
   document.body.classList.toggle("notification-only-mode", isNotificationOnlyMode());
+  document.body.classList.toggle("night-mode", isNightModeActive());
 }
 
 function setManeuverZoomRadius(value) {
+  state.settings.profile = "custom";
   state.settings.maneuverViewRadiusKm = clamp(Number(value) || DEFAULT_MANEUVER_VIEW_RADIUS_KM, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
   updateSettingsUi();
   saveSettings();
   scheduleRender(true);
 }
 
+function setProfile(profile) {
+  const patch = profileSettings(profile);
+  state.settings.profile = patch ? profile : "custom";
+  if (patch) Object.assign(state.settings, patch);
+  updateSettingsUi();
+  saveSettings();
+  state.lastRenderKey = "";
+  if (isNotificationOnlyMode()) stopMotionAnimation();
+  else startMotionAnimation();
+  scheduleRender(true);
+  showStatus(`Profil: ${profileLabel()}`);
+}
+
+function setNightMode(mode) {
+  state.settings.profile = "custom";
+  state.settings.nightMode = ["auto", "on", "off"].includes(mode) ? mode : DEFAULT_NIGHT_MODE;
+  updateSettingsUi();
+  saveSettings();
+  scheduleRender(true);
+}
+
 function setSoundMode(mode) {
+  state.settings.profile = "custom";
   state.settings.soundMode = ["voice", "signal", "both"].includes(mode) ? mode : DEFAULT_SOUND_MODE;
   updateSettingsUi();
   saveSettings();
@@ -445,6 +567,7 @@ function setSoundMode(mode) {
 }
 
 function setSignalVolume(value) {
+  state.settings.profile = "custom";
   state.settings.signalVolume = clampNumber(value, DEFAULT_SIGNAL_VOLUME, 0, 100);
   updateSettingsUi();
   saveSettings();
@@ -452,6 +575,7 @@ function setSignalVolume(value) {
 }
 
 function setManeuverNotifyDistance(value) {
+  state.settings.profile = "custom";
   state.settings.maneuverNotifyDistanceM = clampNumber(value, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000);
   updateSettingsUi();
   saveSettings();
@@ -459,6 +583,7 @@ function setManeuverNotifyDistance(value) {
 }
 
 function setManeuverReminderDelay(value) {
+  state.settings.profile = "custom";
   state.settings.maneuverReminderDelaySec = clampNumber(value, DEFAULT_MANEUVER_REMINDER_DELAY_SEC, 3, 60);
   updateSettingsUi();
   saveSettings();
@@ -468,6 +593,7 @@ function setManeuverReminderDelay(value) {
 }
 
 function setPoiNotifyDistance(value) {
+  state.settings.profile = "custom";
   state.settings.poiNotifyDistanceM = clamp(Number(value) || DEFAULT_POI_NOTIFY_DISTANCE_M, 50, 5000);
   updateSettingsUi();
   saveSettings();
@@ -475,6 +601,7 @@ function setPoiNotifyDistance(value) {
 }
 
 function setCameraNotifyDistance(value) {
+  state.settings.profile = "custom";
   state.settings.cameraNotifyDistanceM = clamp(Number(value) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
   updateSettingsUi();
   saveSettings();
@@ -482,6 +609,7 @@ function setCameraNotifyDistance(value) {
 }
 
 function setNearbyRoadRadius(value) {
+  state.settings.profile = "custom";
   state.settings.nearbyRoadRadiusM = clampNumber(value, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000);
   updateSettingsUi();
   saveSettings();
@@ -489,6 +617,7 @@ function setNearbyRoadRadius(value) {
 }
 
 function setPoiType(type, enabled) {
+  state.settings.profile = "custom";
   const current = new Set(state.settings.poiTypes);
   if (enabled) current.add(type);
   else current.delete(type);
@@ -498,6 +627,7 @@ function setPoiType(type, enabled) {
 }
 
 function setPowerMode(mode) {
+  state.settings.profile = "custom";
   state.settings.powerMode = ["full", "lite", "mega", "ultra"].includes(mode) ? mode : "full";
   updateSettingsUi();
   saveSettings();
@@ -511,6 +641,22 @@ function setPowerMode(mode) {
 
 function renderDeviceStatus() {
   if (el.deviceTempText) el.deviceTempText.textContent = "Brak dostępu";
+
+  if (el.networkText) {
+    const online = navigator.onLine !== false;
+    el.networkText.textContent = online ? "Online" : "Offline";
+    el.networkText.classList.toggle("warn", !online);
+  }
+
+  if (el.gpsQualityText && el.gpsAccuracyText) {
+    const accuracy = Number(state.gpsAccuracyM);
+    const hasGps = Number.isFinite(accuracy);
+    const quality = !hasGps ? "Brak danych" : accuracy <= 12 ? "Bardzo dobry" : accuracy <= 30 ? "Dobry" : accuracy <= 70 ? "Słaby" : "Bardzo słaby";
+    el.gpsQualityText.textContent = quality;
+    el.gpsAccuracyText.textContent = hasGps ? `${Math.round(accuracy)} m` : "--";
+    el.gpsQualityText.classList.toggle("warn", hasGps && accuracy > 70);
+    el.gpsAccuracyText.classList.toggle("warn", hasGps && accuracy > 70);
+  }
 
   if (el.batteryText) {
     if (state.battery) {
@@ -858,6 +1004,8 @@ async function locateStart() {
   try {
     const start = await getCurrentPosition();
     state.start = start;
+    state.gpsAccuracyM = Number.isFinite(start.accuracy) ? start.accuracy : null;
+    renderDeviceStatus();
     const acc = Number.isFinite(start.accuracy) ? `, dokładność ${Math.round(start.accuracy)} m` : "";
     el.gpsStart.textContent = `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}${acc}`;
     showStatus("GPS gotowy");
@@ -1781,6 +1929,32 @@ function renderManeuver() {
   }
 }
 
+function currentManeuverMessage() {
+  const current = getNextInstruction();
+  if (!current) return "Brak aktywnego manewru";
+  const distKm = Math.max(0, current.doneKm - state.progressKm);
+  return current.type === "arrive"
+    ? `Za ${fmtKm(distKm)} dotrzesz do celu`
+    : `Za ${fmtKm(distKm)}, ${current.text}`;
+}
+
+function repeatCurrentManeuver() {
+  if (!state.route) return showStatus("Brak trasy");
+  const message = currentManeuverMessage();
+  showStatus(message);
+  announceAudio(message, "maneuver");
+}
+
+function announceNextManeuver() {
+  const instructions = state.route?.instructions || [];
+  const next = instructions[state.nextInstructionIndex + 1];
+  if (!next) return repeatCurrentManeuver();
+  const distKm = Math.max(0, next.doneKm - state.progressKm);
+  const message = `Następnie za ${fmtKm(distKm)}, ${next.text}`;
+  showStatus(message);
+  announceAudio(message, "notice");
+}
+
 function buildRouteChoice(route, index, destName) {
   const coords = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
   const cumulative = buildCumulative(coords);
@@ -1944,6 +2118,21 @@ function activeRouteSnapshot() {
 function persistLastRoute() {
   if (!state.route) return;
   localStorage.setItem(STORE_KEY, JSON.stringify(activeRouteSnapshot()));
+  state.lastRouteProgressSaveAt = Date.now();
+}
+
+function persistRouteProgressThrottled(force = false) {
+  if (!state.route) return;
+  const now = Date.now();
+  if (!force && now - state.lastRouteProgressSaveAt < ROUTE_PROGRESS_SAVE_INTERVAL_MS) return;
+  persistLastRoute();
+}
+
+function updateNetworkStatus(announce = false) {
+  const online = navigator.onLine !== false;
+  document.body.classList.toggle("offline", !online);
+  renderDeviceStatus();
+  if (announce) showStatus(online ? "Sieć wróciła" : "Tryb offline");
 }
 
 function routeDefaultName(snapshot = activeRouteSnapshot()) {
@@ -1999,6 +2188,61 @@ function readSavedRoutes() {
 
 function writeSavedRoutes(routes) {
   localStorage.setItem(ROUTES_STORE_KEY, JSON.stringify(routes));
+}
+
+function exportAppData() {
+  persistRouteProgressThrottled(true);
+  const payload = {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    settings: state.settings,
+    lastRoute: (() => {
+      try {
+        return JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+      } catch (_) {
+        return null;
+      }
+    })(),
+    routes: readSavedRoutes()
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  anchor.href = url;
+  anchor.download = `navi-backup-${stamp}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  showStatus("Wyeksportowano dane");
+}
+
+function importAppDataFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result || "{}"));
+      const routes = Array.isArray(data.routes) ? data.routes.map(normalizeSavedRoute).filter(Boolean) : [];
+      const settings = data.settings && typeof data.settings === "object" ? data.settings : null;
+      if (!routes.length && !settings && !data.lastRoute) throw new Error("Plik nie zawiera danych Navi");
+      if (!confirm("Import nadpisze ustawienia i zapisane trasy. Kontynuować?")) return;
+      if (settings) {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...state.settings, ...settings }));
+        loadSettings();
+      }
+      writeSavedRoutes(routes);
+      if (data.lastRoute) localStorage.setItem(STORE_KEY, JSON.stringify(data.lastRoute));
+      updateSavedInfo();
+      showStatus(`Zaimportowano: ${routes.length} tras`);
+    } catch (error) {
+      alert(error.message || "Nie udało się zaimportować danych");
+    } finally {
+      el.importDataInput.value = "";
+    }
+  };
+  reader.readAsText(file);
 }
 
 function applySavedRoute(saved) {
@@ -2144,6 +2388,7 @@ function startSimulation() {
       announceAudio("Dotarłeś do celu", "notice");
     }
     markProgressUpdated();
+    persistRouteProgressThrottled();
     startMotionAnimation();
     scheduleRender();
   }, 1000);
@@ -2186,16 +2431,19 @@ function startGps() {
   state.gpsWatch = navigator.geolocation.watchPosition(pos => {
     const point = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     const now = Date.now();
+    state.gpsAccuracyM = Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null;
+    renderDeviceStatus();
     if (state.lastGps) {
       const dt = Math.max(0.5, (now - state.lastGps.time) / 1000);
       state.speedKmh = (kmBetween(state.lastGps.point, point) / dt) * 3600;
     } else if (typeof pos.coords.speed === "number") {
       state.speedKmh = Math.max(0, pos.coords.speed * 3.6);
     }
-    state.lastGps = { point, time: now };
+    state.lastGps = { point, time: now, accuracy: state.gpsAccuracyM };
     const previousProgress = state.progressKm;
     state.progressKm = nearestProgress(point);
     markProgressUpdated();
+    persistRouteProgressThrottled();
     startMotionAnimation();
     const movedEnough = Math.abs(state.progressKm - previousProgress) >= GPS_RENDER_STEP_KM;
     const speedChangedEnough = Math.abs(state.speedKmh - state.lastRenderedSpeedKmh) >= GPS_SPEED_RENDER_STEP_KMH;
@@ -2260,6 +2508,8 @@ el.menuBtn.addEventListener("click", () => el.drawer.classList.add("open"));
 el.closeMenuBtn.addEventListener("click", () => el.drawer.classList.remove("open"));
 el.voiceBtn.addEventListener("click", () => unlockSpeech(true));
 el.powerModeInput.addEventListener("change", event => setPowerMode(event.target.value));
+if (el.profileInput) el.profileInput.addEventListener("change", event => setProfile(event.target.value));
+if (el.nightModeInput) el.nightModeInput.addEventListener("change", event => setNightMode(event.target.value));
 if (el.soundModeInput) el.soundModeInput.addEventListener("change", event => setSoundMode(event.target.value));
 if (el.signalVolumeInput) el.signalVolumeInput.addEventListener("input", event => setSignalVolume(event.target.value));
 el.routeChoices.addEventListener("click", event => {
@@ -2295,6 +2545,14 @@ for (const input of el.poiTypeInputs || []) {
   input.addEventListener("change", event => setPoiType(event.target.dataset.poiType, event.target.checked));
 }
 el.clearBtn.addEventListener("click", clearRoute);
+if (el.exportDataBtn) el.exportDataBtn.addEventListener("click", exportAppData);
+if (el.importDataBtn) el.importDataBtn.addEventListener("click", () => el.importDataInput?.click());
+if (el.importDataInput) {
+  el.importDataInput.addEventListener("change", event => importAppDataFile(event.target.files?.[0]));
+}
+if (el.repeatBtn) el.repeatBtn.addEventListener("click", repeatCurrentManeuver);
+if (el.nextBtn) el.nextBtn.addEventListener("click", announceNextManeuver);
+if (el.quickStopBtn) el.quickStopBtn.addEventListener("click", stopAll);
 el.panelHandle.addEventListener("click", togglePanel);
 el.panelToggleBtn.addEventListener("click", togglePanel);
 el.bottomSheetButton.addEventListener("click", () => setPanelOpen(true));
@@ -2321,11 +2579,19 @@ window.addEventListener("resize", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") updateWakeLock();
+  else persistRouteProgressThrottled(true);
 });
+window.addEventListener("pagehide", () => persistRouteProgressThrottled(true));
+window.addEventListener("online", () => updateNetworkStatus(true));
+window.addEventListener("offline", () => updateNetworkStatus(true));
 
 loadSettings();
 updateSavedInfo();
 startDeviceMonitor();
 registerServiceWorker();
+updateNetworkStatus();
+setInterval(() => {
+  if (state.settings.nightMode === "auto") updateSettingsUi();
+}, 60000);
 setPanelOpen(true);
 scheduleRender(true);
