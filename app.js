@@ -28,11 +28,12 @@ const LITE_MOTION_INTERVAL_MS = 180;
 const DEVICE_MONITOR_INTERVAL_MS = 2500;
 const SPEECH_QUEUE_LIMIT = 6;
 const SPEECH_WATCHDOG_MS = 4500;
+const DEFAULT_SOUND_MODE = "both";
+const DEFAULT_SIGNAL_VOLUME = 70;
 const DEFAULT_MANEUVER_NOTIFY_DISTANCE_M = 120;
 const DEFAULT_MANEUVER_REMINDER_DELAY_SEC = 12;
 const DEFAULT_POI_NOTIFY_DISTANCE_M = 800;
 const DEFAULT_CAMERA_NOTIFY_DISTANCE_M = 1200;
-const DEFAULT_MAX_DRIVING_SPEED_KMH = 90;
 const DEFAULT_NEARBY_ROAD_RADIUS_M = 500;
 const DEFAULT_POI_TYPES = ["fuel", "parking", "food", "help"];
 const POI_TYPE_CONFIG = {
@@ -88,6 +89,11 @@ const state = {
     watchdog: null,
     lastStartedAt: 0
   },
+  audio: {
+    context: null,
+    unlocked: false,
+    lastSignalAt: 0
+  },
   deviceMonitor: {
     lastFrameAt: 0,
     frameSamples: [],
@@ -96,11 +102,12 @@ const state = {
   settings: {
     maneuverViewRadiusKm: DEFAULT_MANEUVER_VIEW_RADIUS_KM,
     powerMode: "full",
+    soundMode: DEFAULT_SOUND_MODE,
+    signalVolume: DEFAULT_SIGNAL_VOLUME,
     maneuverNotifyDistanceM: DEFAULT_MANEUVER_NOTIFY_DISTANCE_M,
     maneuverReminderDelaySec: DEFAULT_MANEUVER_REMINDER_DELAY_SEC,
     poiNotifyDistanceM: DEFAULT_POI_NOTIFY_DISTANCE_M,
     cameraNotifyDistanceM: DEFAULT_CAMERA_NOTIFY_DISTANCE_M,
-    maxDrivingSpeedKmh: DEFAULT_MAX_DRIVING_SPEED_KMH,
     nearbyRoadRadiusM: DEFAULT_NEARBY_ROAD_RADIUS_M,
     poiTypes: [...DEFAULT_POI_TYPES]
   }
@@ -142,6 +149,10 @@ const el = {
   voiceBtn: document.getElementById("voiceBtn"),
   powerModeInput: document.getElementById("powerModeInput"),
   powerModeValue: document.getElementById("powerModeValue"),
+  soundModeInput: document.getElementById("soundModeInput"),
+  soundModeValue: document.getElementById("soundModeValue"),
+  signalVolumeInput: document.getElementById("signalVolumeInput"),
+  signalVolumeValue: document.getElementById("signalVolumeValue"),
   maneuverNotifyInput: document.getElementById("maneuverNotifyInput"),
   maneuverNotifyValue: document.getElementById("maneuverNotifyValue"),
   maneuverReminderInput: document.getElementById("maneuverReminderInput"),
@@ -150,8 +161,6 @@ const el = {
   poiNotifyValue: document.getElementById("poiNotifyValue"),
   cameraNotifyInput: document.getElementById("cameraNotifyInput"),
   cameraNotifyValue: document.getElementById("cameraNotifyValue"),
-  maxSpeedInput: document.getElementById("maxSpeedInput"),
-  maxSpeedValue: document.getElementById("maxSpeedValue"),
   roadRadiusInput: document.getElementById("roadRadiusInput"),
   roadRadiusValue: document.getElementById("roadRadiusValue"),
   poiTypeInputs: Array.from(document.querySelectorAll("[data-poi-type]")),
@@ -303,6 +312,12 @@ function powerModeLabel(mode = state.settings.powerMode) {
   return "Pełny";
 }
 
+function soundModeLabel(mode = state.settings.soundMode) {
+  if (mode === "voice") return "Lektor";
+  if (mode === "signal") return "Sygnały";
+  return "Lektor + sygnały";
+}
+
 function normalizePoiTypes(value) {
   if (!Array.isArray(value)) return [...DEFAULT_POI_TYPES];
   return [...new Set(value.filter(type => POI_TYPE_CONFIG[type]))];
@@ -321,15 +336,17 @@ function roadRadiusKm() {
   return clampNumber(state.settings.nearbyRoadRadiusM, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000) / 1000;
 }
 
-function maxSpeedDurationSec(distanceKm = state.totalKm) {
-  const speed = clampNumber(state.settings.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
-  return distanceKm > 0 ? distanceKm / speed * 3600 : 0;
+function arrivalTimeText(route = state.route) {
+  if (!route || !Number.isFinite(route.durationSec)) return "--";
+  return new Date(Date.now() + route.durationSec * 1000).toLocaleTimeString("pl-PL", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
-function routeTimeHtml(route = state.route, distanceKm = state.totalKm) {
+function routeTimeHtml(route = state.route) {
   if (!route) return "--";
-  const speed = clampNumber(state.settings.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
-  return `${fmtTime(route.durationSec)}<small>max ${speed}: ${fmtTime(maxSpeedDurationSec(distanceKm))}</small>`;
+  return `${fmtTime(route.durationSec)}<small>przyjazd ${arrivalTimeText(route)}</small>`;
 }
 
 function loadSettings() {
@@ -339,11 +356,12 @@ function loadSettings() {
     if (Number.isFinite(radius)) {
       state.settings.maneuverViewRadiusKm = clamp(radius, MIN_MANEUVER_VIEW_RADIUS_KM, MAX_MANEUVER_VIEW_RADIUS_KM);
     }
+    state.settings.soundMode = ["voice", "signal", "both"].includes(saved.soundMode) ? saved.soundMode : DEFAULT_SOUND_MODE;
+    state.settings.signalVolume = clampNumber(saved.signalVolume, DEFAULT_SIGNAL_VOLUME, 0, 100);
     state.settings.maneuverNotifyDistanceM = clampNumber(saved.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000);
     state.settings.maneuverReminderDelaySec = clampNumber(saved.maneuverReminderDelaySec, DEFAULT_MANEUVER_REMINDER_DELAY_SEC, 3, 60);
     state.settings.poiNotifyDistanceM = clamp(Number(saved.poiNotifyDistanceM) || DEFAULT_POI_NOTIFY_DISTANCE_M, 50, 5000);
     state.settings.cameraNotifyDistanceM = clamp(Number(saved.cameraNotifyDistanceM) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
-    state.settings.maxDrivingSpeedKmh = clampNumber(saved.maxDrivingSpeedKmh, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
     state.settings.nearbyRoadRadiusM = clampNumber(saved.nearbyRoadRadiusM, DEFAULT_NEARBY_ROAD_RADIUS_M, 0, 2000);
     state.settings.poiTypes = normalizePoiTypes(saved.poiTypes);
     state.settings.powerMode = ["full", "lite", "mega", "ultra"].includes(saved.powerMode)
@@ -352,11 +370,12 @@ function loadSettings() {
   } catch (_) {
     state.settings.maneuverViewRadiusKm = DEFAULT_MANEUVER_VIEW_RADIUS_KM;
     state.settings.powerMode = "full";
+    state.settings.soundMode = DEFAULT_SOUND_MODE;
+    state.settings.signalVolume = DEFAULT_SIGNAL_VOLUME;
     state.settings.maneuverNotifyDistanceM = DEFAULT_MANEUVER_NOTIFY_DISTANCE_M;
     state.settings.maneuverReminderDelaySec = DEFAULT_MANEUVER_REMINDER_DELAY_SEC;
     state.settings.poiNotifyDistanceM = DEFAULT_POI_NOTIFY_DISTANCE_M;
     state.settings.cameraNotifyDistanceM = DEFAULT_CAMERA_NOTIFY_DISTANCE_M;
-    state.settings.maxDrivingSpeedKmh = DEFAULT_MAX_DRIVING_SPEED_KMH;
     state.settings.nearbyRoadRadiusM = DEFAULT_NEARBY_ROAD_RADIUS_M;
     state.settings.poiTypes = [...DEFAULT_POI_TYPES];
   }
@@ -375,6 +394,12 @@ function updateSettingsUi() {
   }
   if (el.powerModeInput) el.powerModeInput.value = state.settings.powerMode;
   if (el.powerModeValue) el.powerModeValue.textContent = powerModeLabel();
+  if (el.soundModeInput) el.soundModeInput.value = state.settings.soundMode;
+  if (el.soundModeValue) el.soundModeValue.textContent = soundModeLabel();
+  if (el.signalVolumeInput && el.signalVolumeValue) {
+    el.signalVolumeInput.value = String(state.settings.signalVolume);
+    el.signalVolumeValue.textContent = `${state.settings.signalVolume}%`;
+  }
   if (el.maneuverNotifyInput && el.maneuverNotifyValue) {
     el.maneuverNotifyInput.value = String(state.settings.maneuverNotifyDistanceM);
     el.maneuverNotifyValue.textContent = fmtKm(state.settings.maneuverNotifyDistanceM / 1000);
@@ -390,10 +415,6 @@ function updateSettingsUi() {
   if (el.cameraNotifyInput && el.cameraNotifyValue) {
     el.cameraNotifyInput.value = String(state.settings.cameraNotifyDistanceM);
     el.cameraNotifyValue.textContent = fmtKm(state.settings.cameraNotifyDistanceM / 1000);
-  }
-  if (el.maxSpeedInput && el.maxSpeedValue) {
-    el.maxSpeedInput.value = String(state.settings.maxDrivingSpeedKmh);
-    el.maxSpeedValue.textContent = `${state.settings.maxDrivingSpeedKmh} km/h`;
   }
   if (el.roadRadiusInput && el.roadRadiusValue) {
     el.roadRadiusInput.value = String(state.settings.nearbyRoadRadiusM);
@@ -413,6 +434,20 @@ function setManeuverZoomRadius(value) {
   updateSettingsUi();
   saveSettings();
   scheduleRender(true);
+}
+
+function setSoundMode(mode) {
+  state.settings.soundMode = ["voice", "signal", "both"].includes(mode) ? mode : DEFAULT_SOUND_MODE;
+  updateSettingsUi();
+  saveSettings();
+  if (state.settings.soundMode !== "voice") playAlarmSignal("test");
+}
+
+function setSignalVolume(value) {
+  state.settings.signalVolume = clampNumber(value, DEFAULT_SIGNAL_VOLUME, 0, 100);
+  updateSettingsUi();
+  saveSettings();
+  if (state.settings.soundMode !== "voice") playAlarmSignal("test");
 }
 
 function setManeuverNotifyDistance(value) {
@@ -442,14 +477,6 @@ function setCameraNotifyDistance(value) {
   state.settings.cameraNotifyDistanceM = clamp(Number(value) || DEFAULT_CAMERA_NOTIFY_DISTANCE_M, 50, 5000);
   updateSettingsUi();
   saveSettings();
-  scheduleRender(true);
-}
-
-function setMaxDrivingSpeed(value) {
-  state.settings.maxDrivingSpeedKmh = clampNumber(value, DEFAULT_MAX_DRIVING_SPEED_KMH, 20, 180);
-  updateSettingsUi();
-  saveSettings();
-  renderRouteChoices();
   scheduleRender(true);
 }
 
@@ -594,6 +621,68 @@ function createSpeechUtterance(text, { volume = 1 } = {}) {
   return utterance;
 }
 
+function audioContextSupported() {
+  return "AudioContext" in window || "webkitAudioContext" in window;
+}
+
+function getAudioContext() {
+  if (!audioContextSupported()) return null;
+  if (!state.audio.context) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    state.audio.context = new AudioCtx();
+  }
+  return state.audio.context;
+}
+
+function unlockAudio() {
+  const ctx = getAudioContext();
+  if (!ctx) return false;
+  try {
+    if (ctx.state === "suspended") ctx.resume();
+    state.audio.unlocked = true;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function playTone(startAt, frequency, duration, volume) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), startAt + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(startAt);
+  osc.stop(startAt + duration + 0.035);
+}
+
+function playAlarmSignal(kind = "notice") {
+  if (state.settings.signalVolume <= 0 || !unlockAudio()) return;
+  const nowMs = Date.now();
+  if (kind !== "test" && nowMs - state.audio.lastSignalAt < 900) return;
+  state.audio.lastSignalAt = nowMs;
+  const ctx = state.audio.context;
+  const volume = Math.max(0.01, state.settings.signalVolume / 100 * 0.18);
+  const start = ctx.currentTime + 0.015;
+  const patterns = {
+    speed: [980, 760, 980],
+    maneuver: [660, 880],
+    reminder: [520, 760],
+    test: [620, 840],
+    notice: [740, 740]
+  };
+  const tones = patterns[kind] || patterns.notice;
+  tones.forEach((frequency, index) => {
+    playTone(start + index * 0.16, frequency, 0.105, volume);
+  });
+}
+
 function startSpeechWatchdog() {
   if (state.speech.watchdog) return;
   state.speech.watchdog = setInterval(() => {
@@ -632,8 +721,10 @@ function flushSpeechQueue() {
 }
 
 function unlockSpeech(announce = false) {
+  unlockAudio();
   if (!speechSupported()) {
     showStatus("Brak lektora w tej przeglądarce");
+    if (announce) playAlarmSignal("test");
     return false;
   }
   try {
@@ -645,7 +736,7 @@ function unlockSpeech(announce = false) {
     state.speech.speaking = false;
     state.speech.queue = [];
     startSpeechWatchdog();
-    if (announce) speak("Lektor działa");
+    if (announce) announceAudio("Lektor działa", "test");
     else flushSpeechQueue();
     return true;
   } catch (_) {
@@ -655,6 +746,7 @@ function unlockSpeech(announce = false) {
 }
 
 function primeSpeechFromGesture() {
+  unlockAudio();
   if (state.speech.unlocked || !speechSupported()) return;
   try {
     const synth = window.speechSynthesis;
@@ -677,6 +769,14 @@ function primeSpeechFromGesture() {
   } catch (_) {
     state.speech.speaking = false;
   }
+}
+
+function announceAudio(text, kind = "notice") {
+  if (!text) return;
+  const mode = state.settings.soundMode || DEFAULT_SOUND_MODE;
+  if (mode !== "voice") playAlarmSignal(kind);
+  if (mode === "signal") return;
+  speak(text);
 }
 
 function speak(text) {
@@ -1296,7 +1396,7 @@ function renderSpeedLimit() {
   document.getElementById("hud").classList.toggle("speeding", !!speeding);
   if (speeding && Date.now() - state.lastSpeedAlertAt > 9000) {
     state.lastSpeedAlertAt = Date.now();
-    speak(`Uwaga, przekroczona prędkość. Limit ${state.currentLimit} kilometrów na godzinę`);
+    announceAudio(`Uwaga, przekroczona prędkość. Limit ${state.currentLimit} kilometrów na godzinę`, "speed");
   }
 }
 
@@ -1341,7 +1441,7 @@ function scheduleManeuverReminder(index) {
     const notifyDistanceKm = clampNumber(state.settings.maneuverNotifyDistanceM, DEFAULT_MANEUVER_NOTIFY_DISTANCE_M, 20, 2000) / 1000;
     if (distKm > 0.02 && distKm <= notifyDistanceKm) {
       state.maneuverReminderSpoken = true;
-      speak(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`);
+      announceAudio(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`, "reminder");
     }
   }, delayMs);
 }
@@ -1472,7 +1572,7 @@ function render(force = false) {
   const liteMode = isLiteMode();
   const notificationOnlyMode = isNotificationOnlyMode();
   const modeKey = state.settings.powerMode;
-  const summaryKey = `${state.settings.maxDrivingSpeedKmh}:${state.settings.nearbyRoadRadiusM}`;
+  const summaryKey = `${state.settings.nearbyRoadRadiusM}`;
   const renderKey = route?.coords?.length
     ? `${routeId}:${modeKey}:${summaryKey}:${Math.round(state.progressKm * 125)}:${Math.round(state.speedKmh / 3)}:${state.nextInstructionIndex}:${state.currentLimit || 0}`
     : `empty:${modeKey}:${summaryKey}:${Math.round(state.speedKmh / 5)}`;
@@ -1634,7 +1734,7 @@ function renderManeuver() {
     state.lastManeuverAlertAt = Date.now();
     state.maneuverReminderSpoken = false;
     scheduleManeuverReminder(state.nextInstructionIndex);
-    speak(current.type === "arrive" ? `Za ${fmtKm(distKm)} dotrzesz do celu` : `Za ${fmtKm(distKm)}, ${current.text}`);
+    announceAudio(current.type === "arrive" ? `Za ${fmtKm(distKm)} dotrzesz do celu` : `Za ${fmtKm(distKm)}, ${current.text}`, "maneuver");
   } else if (
     isInNotifyRange &&
     state.lastSpokenInstruction === state.nextInstructionIndex &&
@@ -1645,7 +1745,7 @@ function renderManeuver() {
     if (state.maneuverReminderTimer) clearTimeout(state.maneuverReminderTimer);
     state.maneuverReminderTimer = null;
     state.maneuverReminderSpoken = true;
-    speak(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`);
+    announceAudio(current.type === "arrive" ? `Przypomnienie, cel za ${fmtKm(distKm)}` : `Przypomnienie, za ${fmtKm(distKm)}, ${current.text}`, "reminder");
   }
 }
 
@@ -1687,7 +1787,7 @@ function renderRouteChoices() {
       <div class="route-choice ${active ? "active" : ""}">
         <button type="button" data-route-preview="${choice.index}">
           <strong>${choice.label}</strong>
-          <small>${fmtTime(choice.durationSec)} · max ${fmtTime(maxSpeedDurationSec(choice.distanceKm))} · ${fmtKm(choice.distanceKm)}</small>
+          <small>${fmtTime(choice.durationSec)} · przyjazd ${arrivalTimeText(choice.route)} · ${fmtKm(choice.distanceKm)}</small>
         </button>
         <button type="button" data-route-choice="${choice.index}">${active ? "Wybierz podgląd" : "Wybierz"}</button>
       </div>
@@ -1761,7 +1861,7 @@ async function selectRouteChoice(index) {
   updateSavedInfo();
   scheduleRender(true);
   setPanelOpen(false);
-  speak("Trasa wybrana");
+  announceAudio("Trasa wybrana", "notice");
 }
 
 async function createRoute() {
@@ -1792,7 +1892,7 @@ async function createRoute() {
       ? `Znaleziono ${state.routeChoices.length} trasy. Wybierz wariant.`
       : "Znaleziono trasę. Potwierdź wybór.");
     setPanelOpen(true);
-    speak("Wybierz trasę");
+    announceAudio("Wybierz trasę", "notice");
   } catch (error) {
     showStatus(error.message || "Błąd");
     alert(error.message || "Nie udało się wyznaczyć trasy");
@@ -1992,7 +2092,7 @@ function startSimulation() {
   state.nextInstructionIndex = 0;
   resetManeuverVoiceState();
   showStatus("Symulacja jazdy");
-  speak("Symulacja rozpoczęta");
+  announceAudio("Symulacja rozpoczęta", "notice");
   let last = performance.now();
   const simDurationMs = Math.max(SIM_MIN_MS, Math.min(SIM_MAX_MS, state.totalKm * 1400));
   const simKmh = state.totalKm / (simDurationMs / 3600000);
@@ -2009,7 +2109,7 @@ function startSimulation() {
       stopSimulation();
       state.speedKmh = 0;
       showStatus("Cel osiągnięty");
-      speak("Dotarłeś do celu");
+      announceAudio("Dotarłeś do celu", "notice");
     }
     markProgressUpdated();
     startMotionAnimation();
@@ -2123,6 +2223,8 @@ el.menuBtn.addEventListener("click", () => el.drawer.classList.add("open"));
 el.closeMenuBtn.addEventListener("click", () => el.drawer.classList.remove("open"));
 el.voiceBtn.addEventListener("click", () => unlockSpeech(true));
 el.powerModeInput.addEventListener("change", event => setPowerMode(event.target.value));
+if (el.soundModeInput) el.soundModeInput.addEventListener("change", event => setSoundMode(event.target.value));
+if (el.signalVolumeInput) el.signalVolumeInput.addEventListener("input", event => setSignalVolume(event.target.value));
 el.routeChoices.addEventListener("click", event => {
   const preview = event.target.closest("[data-route-preview]");
   if (preview) {
@@ -2151,7 +2253,6 @@ if (el.maneuverNotifyInput) el.maneuverNotifyInput.addEventListener("input", eve
 if (el.maneuverReminderInput) el.maneuverReminderInput.addEventListener("input", event => setManeuverReminderDelay(event.target.value));
 if (el.poiNotifyInput) el.poiNotifyInput.addEventListener("input", event => setPoiNotifyDistance(event.target.value));
 if (el.cameraNotifyInput) el.cameraNotifyInput.addEventListener("input", event => setCameraNotifyDistance(event.target.value));
-if (el.maxSpeedInput) el.maxSpeedInput.addEventListener("input", event => setMaxDrivingSpeed(event.target.value));
 if (el.roadRadiusInput) el.roadRadiusInput.addEventListener("input", event => setNearbyRoadRadius(event.target.value));
 for (const input of el.poiTypeInputs || []) {
   input.addEventListener("change", event => setPoiType(event.target.dataset.poiType, event.target.checked));
